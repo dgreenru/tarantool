@@ -27,12 +27,15 @@
 
 #include <stdbool.h>
 #include <netinet/in.h>
-#include <tarantool_ev.h>
+#include <exception.h>
 
-int sock_nonblocking(int fd);
+@interface SocketError: SystemError
+@end
+
+void sock_nonblocking(int fd);
+
 int sock_connect(struct sockaddr_in *addr);
-int sock_create(struct sockaddr_in *addr, in_port_t port, int backlog,
-		bool retry, ev_tstamp delay);
-int sock_accept(int sockfd);
+int sock_create_server(struct sockaddr_in *addr, int backlog);
+int sock_accept_client(int sockfd);
 
 #endif /* TARANTOOL_SOCK_H_INCLUDED */

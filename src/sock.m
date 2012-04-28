@@ -36,123 +36,160 @@
 #include <say.h>
 #include <fiber.h>
 
+@implementation SocketError: SystemError
+@end
+
+/**
+ * Get socket option name.
+ */
+static const char *
+sock_get_option_name(int option)
+{
+#define CASE_OPTION(opt) case opt: return #opt
+	switch (option) {
+	CASE_OPTION(SO_KEEPALIVE);
+	CASE_OPTION(SO_REUSEADDR);
+	CASE_OPTION(TCP_NODELAY);
+	default:
+		return "undefined";
+	}
+#undef CASE_OPTION
+}
+
+/**
+ * Create a socket.
+ */
+static inline int
+sock_create(void)
+{
+	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (fd < 0) {
+		tnt_raise(SocketError, :"socket");
+	}
+	return fd;
+}
+
+/**
+ * Accept a socket connection.
+ */
+static inline int
+sock_accept(int sockfd)
+{
+	int fd = accept(sockfd, NULL, NULL);
+	if (fd < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			return -1;
+		}
+		tnt_raise(SocketError, :"accept");
+	}
+	return fd;
+}
+
 /**
  * Set non-blocking mode for a socket.
  */
-int
+void
 sock_nonblocking(int fd)
 {
 	int flags = fcntl(fd, F_GETFL, 0);
 	if (flags < 0) {
-		say_syserror("fcntl");
-		return -1;
+		tnt_raise(SocketError, :"fcntl(..., F_GETFL, ...)");
 	}
-	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-		say_syserror("fcntl");
-		return -1;
+	flags |= O_NONBLOCK;
+	if (fcntl(fd, F_SETFL, flags) < 0) {
+		tnt_raise(SocketError, :"fcntl(..., F_SETFL, ...)");
 	}
-	return 0;
 }
 
 /**
  * Set an option for a socket.
  */
-static inline int
+static inline void
 sock_enable_option(int fd, int level, int option)
 {
 	int on = 1;
 	if (setsockopt(fd, level, option, &on, sizeof(on)) < 0) {
-		say_syserror("setsockopt");
-		return -1;
+		tnt_raise(SocketError, :"setsockopt(..., %s, ...)",
+			  sock_get_option_name(option));
 	}
-	return 0;
 }
 
 /**
  * Reset linger option for a socket.
  */
-static inline int
+static inline void
 sock_reset_linger(int fd)
 {
 	struct linger ling = { 0, 0 };
 	if (setsockopt(fd, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) != 0) {
-		say_syserror("setsockopt");
-		return -1;
+		tnt_raise(SocketError, :"setsockopt(..., SO_LINGER, ...)");
 	}
-	return 0;
 }
 
 /**
  * Set options appropriate for a client socket.
  */
-static int
+static void
 sock_set_client_options(int fd)
 {
-	if (sock_nonblocking(fd) < 0) {
-		return -1;
-	}
+	sock_nonblocking(fd);
 	/* These options are not critical, ignore the results. */
-	(void) sock_enable_option(fd, SOL_SOCKET, SO_KEEPALIVE);
-	(void) sock_enable_option(fd, IPPROTO_TCP, TCP_NODELAY);
-	return 0;
+	@try {
+		(void) sock_enable_option(fd, SOL_SOCKET, SO_KEEPALIVE);
+		(void) sock_enable_option(fd, IPPROTO_TCP, TCP_NODELAY);
+	}
+	@catch (SocketError *e) {
+		[e log];
+	}
 }
 
 /**
  * Set options appropriate for a server socket.
  */
-static int
+static void
 sock_set_server_options(int fd)
 {
-	if (sock_nonblocking(fd) < 0 ||
-	    sock_enable_option(fd, SOL_SOCKET, SO_REUSEADDR) < 0 ||
-	    sock_enable_option(fd, SOL_SOCKET, SO_KEEPALIVE) < 0 ||
-	    sock_reset_linger(fd) < 0) {
-		return -1;
-	}
-	return 0;
+	sock_nonblocking(fd);
+	sock_enable_option(fd, SOL_SOCKET, SO_REUSEADDR);
+	sock_enable_option(fd, SOL_SOCKET, SO_KEEPALIVE);
+	sock_reset_linger(fd);
 }
 
 /**
  * Set options appropriate for an accepted server socket.
  */
-static int
+static void
 sock_set_server_accepted_options(int fd)
 {
-	if (sock_nonblocking(fd) < 0) {
-		return -1;
-	}
+	sock_nonblocking(fd);
 	/* This option is not critical, ignore the result. */
-	(void) sock_enable_option(fd, IPPROTO_TCP, TCP_NODELAY);
-	return 0;
+	@try {
+		(void) sock_enable_option(fd, IPPROTO_TCP, TCP_NODELAY);
+	}
+	@catch (SocketError *e) {
+		[e log];
+	}
 }
 
-static int
+static void
 sock_connect_inprogress(int fd)
 {
 	/* Wait for the delayed connect() call result. */
-	@try {
-		// TODO: fd poll
-		fiber_yield();
-	}
-	@catch (id e)	{
-		close(fd);
-		@throw;
-	}
+
+	// TODO: fd poll
+
+	fiber_yield();
 
 	/* Get the connect() call result. */
 	int error = 0;
 	socklen_t error_size = sizeof(error);
 	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_size) < 0) {
-		error = errno;
-		say_syserror("getsockopt");
+		tnt_raise(SocketError, :"getsockopt(..., SO_ERROR, ...)");
 	} else if (error_size != sizeof(error)) {
-		error = errno = EINVAL;
-		say_syserror("getsockopt");
+		tnt_raise(SocketError, :EINVAL :"getsockopt(..., SO_ERROR, ...)");
 	} else if (error != 0) {
-		errno = error;
-		say_syserror("connect");
+		tnt_raise(SocketError, :error :"connect");
 	}
-	return error;
 }
 
 /**
@@ -162,105 +199,75 @@ int
 sock_connect(struct sockaddr_in *addr)
 {
 	/* Create a socket. */
-	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (fd < 0) {
-		say_syserror("socket");
-		return -1;
-	}
+	int fd = sock_create();
+	@try {
+		/* Set appropriate options. */
+		sock_set_client_options(fd);
 
-	/* Set appropriate options. */
-	if (sock_set_client_options(fd) < 0) {
-		close(fd);
-		return -1;
-	}
-
-	/* Establish the connection. */
-	if (connect(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
-		/* Something went wrong... */
-		if (errno != EINPROGRESS) {
-			/* Connection has failed. */
-			say_syserror("connect");
-		} else {
-			/* Connection has not concluded yet. */
-			if (sock_connect_inprogress(fd) == 0)
-				return fd;
+		/* Establish the connection. */
+		if (connect(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+			/* Something went wrong... */
+			if (errno == EINPROGRESS) {
+				/* Connection has not concluded yet. */
+				sock_connect_inprogress(fd);
+			} else {
+				/* Connection has failed. */
+				tnt_raise(SocketError, :"connect");
+			}
 		}
-		close(fd);
-		return -1;
+
+		return fd;
 	}
-	return fd;
+	@catch (id e) {
+		close(fd);
+		@throw;
+	}
 }
 
 /**
  * Create a server socket.
  */
 int
-sock_create(struct sockaddr_in *addr, in_port_t port, int backlog, bool retry, ev_tstamp delay)
+sock_create_server(struct sockaddr_in *addr, int backlog)
 {
-	/* Minimal delay is 1 msec. */
-	static const ev_tstamp min_delay = 0.001;
-	if (delay < min_delay) {
-		delay = min_delay;
-	}
-
 	/* Create a socket. */
-	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (fd < 0) {
-		say_syserror("socket");
-		return -1;
-	}
+	int fd = sock_create();
+	@try {
+		/* Set appropriate options. */
+		sock_set_server_options(fd);
 
-	/* Set appropriate options. */
-	if (sock_set_server_options(fd) < 0) {
-		close(fd);
-		return -1;
-	}
-
-	int bind_count = 0;
-bind_retry:
-	if (bind(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
-		if (retry && errno == EADDRINUSE) {
-			/* retry mode, try again after delay */
-			if (0 == bind_count++) {
-				say_warn("port %i is already in use, will "
-					 "retry binding after %lf seconds.",
-					 port, delay);
-			}
-			fiber_sleep(delay);
-			goto bind_retry;
+		/* Go listening on the given address */
+		if (bind(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+			tnt_raise(SocketError, :"bind");
 		}
-		say_syserror("bind");
-		close(fd);
-		return -1;
-	}
+		if (listen(fd, backlog) < 0) {
+			tnt_raise(SocketError, :"listen");
+		}
 
-	if (listen(fd, backlog) != 0) {
-		say_syserror("listen");
-		close(fd);
-		return -1;
+		return fd;
 	}
-
-	return fd;
+	@catch (id e) {
+		close(fd);
+		@throw;
+	}
 }
 
 /**
- * Accept a connection on a server socket.
+ * Accept a client connection on a server socket.
  */
 int
-sock_accept(int sockfd)
+sock_accept_client(int sockfd)
 {
-	int fd = accept(sockfd, NULL, NULL);
-	if (fd < 0) {
-		if (errno != EAGAIN && errno != EWOULDBLOCK) {
-			say_syserror("accept");
-		}
-		return -1;
-	}
+	/* Accept a connection. */
+	int fd = sock_accept(sockfd);
 
 	/* Set appropriate options. */
-	if (sock_set_server_accepted_options(fd) < 0) {
+	@try {
+		sock_set_server_accepted_options(fd);
+	}
+	@catch (id e) {
 		close(fd);
-		return -1;
+		@throw;
 	}
 
 	return fd;

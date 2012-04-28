@@ -46,6 +46,42 @@
 @end
 
 
+@implementation SystemError
+
+- (id) init: (char*)msg, ...
+{
+	va_list ap;
+	va_start(ap, msg);
+	[self init: errno :msg :ap];
+	va_end(ap);
+	return self;
+}
+
+- (id) init: (int)err :(char *)msg, ...
+{
+	va_list ap;
+	va_start(ap, msg);
+	[self init: err :msg :ap];
+	va_end(ap);
+	return self;
+}
+
+- (id) init: (int)err :(char *)msg :(va_list)ap
+{
+	self = [super init];
+	error = err;
+	vsnprintf(errmsg, sizeof(errmsg), msg, ap);
+	return self;
+}
+
+- (void) log
+{
+	say(S_ERROR, strerror(error), "%s", errmsg);
+}
+
+@end
+
+
 @implementation ClientError
 - (id) init: (uint32_t)errcode_, ...
 {

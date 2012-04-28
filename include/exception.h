@@ -48,6 +48,23 @@
 @end
 
 
+/** Internal error resulting from a failed system call.
+ */
+@interface SystemError: tnt_Exception {
+	@public
+		/* errno code */
+		int error;
+		/* error description */
+		char errmsg[TNT_ERRMSG_MAX];
+}
+
+- (id) init: (char*)msg, ...;
+- (id) init: (int)err :(char *)msg, ...;
+- (id) init: (int)err :(char *)msg :(va_list)ap;
+- (void) log;
+@end
+
+
 /** Errors that should make it to the client.
  */
 @interface ClientError: tnt_Exception {

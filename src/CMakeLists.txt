@@ -73,7 +73,7 @@ set (recompiled_sources
      ${CMAKE_SOURCE_DIR}/src/replication.m
      ${CMAKE_SOURCE_DIR}/src/fiber.m PARENT_SCOPE)
 
-set (common_sources tbuf.m palloc.m util.m
+set (common_sources tbuf.m palloc.m util.m sock.m
     salloc.m pickle.m coro.m stat.m log_io.m cpu_feature.m crc32.c
     log_io_remote.m iproto.m exception.m errcode.c errinj.m latch.m)
 
