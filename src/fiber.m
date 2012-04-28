@@ -31,8 +31,6 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <sys/types.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,6 +52,7 @@
 #include <util.h>
 #include <stat.h>
 #include <pickle.h>
+#include <sock.h>
 
 @implementation FiberCancelException
 @end
@@ -802,16 +801,13 @@ static void
 tcp_server_handler(void *data)
 {
 	struct fiber_server *server = (void*) data;
-	struct fiber *h;
 	char name[FIBER_NAME_MAXLEN];
 	int fd;
-	int one = 1;
 
 	if (fiber_serv_socket(fiber, server->port, true, 0.1) != 0) {
 		say_error("init server socket on port %i fail", server->port);
 		exit(EX_OSERR);
 	}
-
 	if (server->on_bind != NULL) {
 		server->on_bind(server->data);
 	}
@@ -820,32 +816,25 @@ tcp_server_handler(void *data)
 	for (;;) {
 		fiber_io_yield();
 
-		while ((fd = accept(fiber->fd, NULL, NULL)) > 0) {
-			if (set_nonblock(fd) == -1) {
-				say_error("can't set nonblock");
-				close(fd);
-				continue;
+		@try {
+			while ((fd = sock_accept_client(fiber->fd)) >= 0) {
+				snprintf(name, sizeof(name),
+					 "%i/handler", server->port);
+				struct fiber *h = fiber_create(name, fd,
+							       server->handler,
+							       server->data);
+				if (h == NULL) {
+					say_error("can't create handler fiber, "
+						  "dropping client connection");
+					close(fd);
+					continue;
+				}
+				h->has_peer = true;
+				fiber_call(h);
 			}
-			if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
-				       &one, sizeof(one)) == -1) {
-				say_syserror("setsockopt failed");
-				/* Do nothing, not a fatal error.  */
-			}
-
-			snprintf(name, sizeof(name), "%i/handler", server->port);
-			h = fiber_create(name, fd, server->handler, server->data);
-			if (h == NULL) {
-				say_error("can't create handler fiber, dropping client connection");
-				close(fd);
-				continue;
-			}
-
-			h->has_peer = true;
-			fiber_call(h);
 		}
-		if (fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-			say_syserror("accept");
-			continue;
+		@catch (SocketError *e) {
+			[e log];
 		}
 	}
 	fiber_io_stop(fiber->fd, EV_READ);
@@ -872,68 +861,19 @@ fiber_server(const char *name, int port, void (*handler) (void *data), void *dat
 	return s;
 }
 
-/** create new fiber's socket and set standat options. */
-static int
-create_socket(struct fiber *fiber)
-{
-	if (fiber->fd != -1) {
-		say_error("fiber is already has socket");
-		goto create_socket_fail;
-	}
-
-	fiber->fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (fiber->fd == -1) {
-		say_syserror("socket");
-		goto create_socket_fail;
-	}
-
-	int one = 1;
-	if (setsockopt(fiber->fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) != 0) {
-		say_syserror("setsockopt");
-		goto create_socket_fail;
-	}
-
-	struct linger ling = { 0, 0 };
-	if (setsockopt(fiber->fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one)) != 0 ||
-	    setsockopt(fiber->fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) != 0 ||
-	    setsockopt(fiber->fd, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) != 0) {
-		say_syserror("setsockopt");
-		goto create_socket_fail;
-	}
-
-	if (set_nonblock(fiber->fd) == -1) {
-		goto create_socket_fail;
-	}
-
-	return 0;
-
-create_socket_fail:
-
-	if (fiber->fd != -1) {
-		close(fiber->fd);
-	}
-	return -1;
-}
-
 /** Create server socket and bind his on port. */
 int
 fiber_serv_socket(struct fiber *fiber, unsigned short port, bool retry, ev_tstamp delay)
 {
-	const ev_tstamp min_delay = 0.001; /* minimal delay is 1 msec */
-	struct sockaddr_in sin;
-	bool warning_said = false;
-
+	/* Minimal delay is 1 msec. */
+	static const ev_tstamp min_delay = 0.001;
 	if (delay < min_delay) {
 		delay = min_delay;
 	}
 
-	if (create_socket(fiber) != 0) {
-		return -1;
-	}
-
+	struct sockaddr_in sin;
 	/* clean sockaddr_in struct */
 	memset(&sin, 0, sizeof(struct sockaddr_in));
-
 	/* fill sockaddr_in struct */
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(port);
@@ -946,37 +886,26 @@ fiber_serv_socket(struct fiber *fiber, unsigned short port, bool retry, ev_tstam
 		}
 	}
 
-	while (true) {
-		if (bind(fiber->fd, (struct sockaddr *)&sin, sizeof(sin)) != 0) {
-			if (retry && (errno == EADDRINUSE)) {
-				/* retry mode, try, to bind after delay */
-				goto sleep_and_retry;
-			}
-			say_syserror("bind");
-			return -1;
-		}
-		if (listen(fiber->fd, cfg.backlog) != 0) {
-			if (retry && (errno == EADDRINUSE)) {
-				/* retry mode, try, to bind after delay */
-				goto sleep_and_retry;
-			}
-			say_syserror("listen");
-			return -1;
-		}
-
-		say_info("bound to port %i", port);
-		break;
-
-	sleep_and_retry:
-		if (!warning_said) {
-			say_warn("port %i is already in use, "
-				 "will retry binding after %lf seconds.", port, delay);
-			warning_said = true;
-		}
-		fiber_sleep(delay);
+	int retry_count = 0;
+again:
+	@try {
+		fiber->fd = sock_create_server(&sin, cfg.backlog);
+		return 0;
 	}
-
-	return 0;
+	@catch (SocketError *e) {
+		if (retry && e->error == EADDRINUSE) {
+			/* retry mode, try again after delay */
+			if (0 == retry_count++) {
+				say_warn("port %i is already in use, will "
+					 "retry binding after %lf seconds.",
+					 port, delay);
+			}
+			fiber_sleep(delay);
+			goto again;
+		}
+		[e log];
+		return -1;
+	}
 }
 
 void
