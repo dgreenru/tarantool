@@ -260,15 +260,66 @@ sock_accept_client(int sockfd)
 {
 	/* Accept a connection. */
 	int fd = sock_accept(sockfd);
-
-	/* Set appropriate options. */
 	@try {
+		/* Set appropriate options. */
 		sock_set_server_accepted_options(fd);
+
+		return fd;
 	}
 	@catch (id e) {
 		close(fd);
 		@throw;
 	}
+}
 
-	return fd;
+/**
+ * Read from a socket.
+ */
+size_t
+sock_read(int fd, void *buf, size_t count)
+{
+	size_t total = 0;
+	while (count > 0) {
+		ssize_t n = read(fd, buf, count);
+		if (n == 0) {
+			break;
+		} else if (n < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			} else if (errno == EINTR) {
+				continue;
+			}
+			tnt_raise(SocketError, :"read");
+		}
+
+		buf += n;
+		count -= n;
+		total += n;
+	}
+	return total;
+}
+
+/**
+ * Write to a socket.
+ */
+size_t
+sock_write(int fd, void *buf, size_t count)
+{
+	size_t total = 0;
+	while (count > 0) {
+		ssize_t n = write(fd, buf, count);
+		if (n < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			} else if (errno == EINTR) {
+				continue;
+			}
+			tnt_raise(SocketError, :"read");
+		}
+
+		buf += n;
+		count -= n;
+		total += n;
+	}
+	return total;
 }

@@ -38,4 +38,7 @@ int sock_connect(struct sockaddr_in *addr);
 int sock_create_server(struct sockaddr_in *addr, int backlog);
 int sock_accept_client(int sockfd);
 
+size_t sock_read(int fd, void *buf, size_t count);
+size_t sock_write(int fd, void *buf, size_t count);
+
 #endif /* TARANTOOL_SOCK_H_INCLUDED */
