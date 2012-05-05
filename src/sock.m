@@ -36,7 +36,10 @@
 #include <say.h>
 #include <fiber.h>
 
-@implementation SocketError: SystemError
+@implementation SocketError
+@end
+
+@implementation SocketEOF
 @end
 
 /**
@@ -260,10 +263,13 @@ sock_accept_client(int sockfd)
 {
 	/* Accept a connection. */
 	int fd = sock_accept(sockfd);
+	if (fd < 0) {
+		return fd;
+	}
+
 	@try {
 		/* Set appropriate options. */
 		sock_set_server_accepted_options(fd);
-
 		return fd;
 	}
 	@catch (id e) {
@@ -282,6 +288,9 @@ sock_read(int fd, void *buf, size_t count)
 	while (count > 0) {
 		ssize_t n = read(fd, buf, count);
 		if (n == 0) {
+			if (count) {
+				@throw [SocketEOF new];
+			}
 			break;
 		} else if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -314,7 +323,7 @@ sock_write(int fd, void *buf, size_t count)
 			} else if (errno == EINTR) {
 				continue;
 			}
-			tnt_raise(SocketError, :"read");
+			tnt_raise(SocketError, :"write");
 		}
 
 		buf += n;

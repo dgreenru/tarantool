@@ -104,4 +104,8 @@ void
 tarantool_lua(struct lua_State *L,
 	      struct tbuf *out, const char *str);
 
+struct service_config;
+int tarantool_config_service(struct service_config *config,
+			     const char *name, int port);
+
 #endif /* TARANTOOL_H_INCLUDED */

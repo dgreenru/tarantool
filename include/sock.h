@@ -32,6 +32,9 @@
 @interface SocketError: SystemError
 @end
 
+@interface SocketEOF: SocketError
+@end
+
 void sock_nonblocking(int fd);
 
 int sock_connect(struct sockaddr_in *addr);

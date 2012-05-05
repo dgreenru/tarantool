@@ -57,7 +57,9 @@
 #include <util.h>
 #include <third_party/gopt/gopt.h>
 #include <cfg/warning.h>
-
+#include <net_io.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 static pid_t master_pid;
 #define DEFAULT_CFG_FILENAME "tarantool.cfg"
@@ -429,6 +431,30 @@ tarantool_free(void)
 #endif
 	if (tarantool_L)
 		tarantool_lua_close(tarantool_L);
+}
+
+int
+tarantool_config_service(struct service_config *config,
+			 const char *name, int port)
+{
+	config->name = name;
+
+	config->addr.sin_family = AF_INET;
+	config->addr.sin_port = htons(port);
+	if (strcmp(cfg.bind_ipaddr, "INADDR_ANY") == 0) {
+		config->addr.sin_addr.s_addr = INADDR_ANY;
+	} else {
+		if (!inet_aton(cfg.bind_ipaddr, &config->addr.sin_addr)) {
+			say_syserror("inet_aton");
+			return -1;
+		}
+	}
+
+	config->listen_backlog = cfg.backlog;
+	config->bind_retry = true;
+	config->bind_delay = 0.1;
+	config->readahead = cfg.readahead;
+	return 0;
 }
 
 static void

@@ -30,6 +30,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#include <net_io.h>
+#include <sock.h>
 #include <fiber.h>
 #include <palloc.h>
 #include <salloc.h>
@@ -109,8 +111,8 @@ tarantool_info(struct tbuf *out)
 	tbuf_printf(out, "  config: \"%s\"" CRLF, path);
 }
 
-static int
-admin_dispatch(lua_State *L)
+static void
+admin_dispatch(Connection *conn, lua_State *L)
 {
 	struct tbuf *out = tbuf_alloc(fiber->gc_pool);
 	struct tbuf *err = tbuf_alloc(fiber->gc_pool);
@@ -119,10 +121,12 @@ admin_dispatch(lua_State *L)
 	char *strstart, *strend;
 	bool state;
 
+	fprintf(stderr, "admin reading...\n");
 	while ((pe = memchr(fiber->rbuf->data, '\n', fiber->rbuf->size)) == NULL) {
-		if (fiber_bread(fiber->rbuf, 1) <= 0)
-			return 0;
+		[conn coReadAhead: fiber->rbuf :1];
+		fprintf(stderr, "%s\n", (char*) fiber->rbuf->data);
 	}
+	fprintf(stderr, "admin executing...\n");
 
 	pe++;
 	p = fiber->rbuf->data;
@@ -225,7 +229,7 @@ admin_dispatch(lua_State *L)
 		state = state_on | state_off;
 
 		commands = (help			%help						|
-			    exit			%{return 0;}					|
+			    exit			%{return;}					|
 			    lua  " "+ string		%lua						|
 			    show " "+ info		%{start(out); tarantool_info(out); end(out);}	|
 			    show " "+ fiber		%{start(out); fiber_info(out); end(out);}	|
@@ -253,11 +257,16 @@ admin_dispatch(lua_State *L)
 		end(out);
 	}
 
-	return fiber_write(out->data, out->size);
+	fprintf(stderr, "admin writing...\n");
+	[conn write: out->data :out->size];
 }
 
+/* {{{ Admin Service. *********************************************/
+
+static SingleWorkerService *admin_service;
+
 static void
-admin_handler(void *data __attribute__((unused)))
+admin_handler(Connection *conn)
 {
 	lua_State *L = lua_newthread(tarantool_L);
 	int coro_ref = luaL_ref(tarantool_L, LUA_REGISTRYINDEX);
@@ -265,26 +274,38 @@ admin_handler(void *data __attribute__((unused)))
 	fiber_setcancelstate(true);
 	@try {
 		for (;;) {
-			if (admin_dispatch(L) <= 0)
-				return;
+			admin_dispatch(conn, L);
 			fiber_gc();
 		}
-	} @finally {
+	}
+	@catch (SocketEOF *eof) {
+		fprintf(stderr, "EOF\n");
+		(void) eof;
+	}
+	@finally {
 		luaL_unref(tarantool_L, LUA_REGISTRYINDEX, coro_ref);
+		[conn close];
+		[conn free];
 	}
 }
 
 int
 admin_init(void)
 {
-	if (fiber_server("admin", cfg.admin_port, admin_handler, NULL, NULL) == NULL) {
-		say_syserror("can't bind to %d", cfg.admin_port);
+	@try {
+		struct service_config config;
+		tarantool_config_service(&config, "admin", cfg.admin_port);
+		admin_service = [SingleWorkerService alloc];
+		[admin_service init: &config :admin_handler];
+		[admin_service start];
+		return 0;
+	}
+	@catch (id e) {
 		return -1;
 	}
-	return 0;
 }
 
-
+/* }}} */
 
 /*
  * Local Variables:
