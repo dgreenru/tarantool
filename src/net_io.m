@@ -25,6 +25,7 @@
 
 #include <net_io.h>
 #include <sock.h>
+#include <tarantool.h>
 
 /* {{{ Event Handlers. ********************************************/
 
@@ -134,14 +135,12 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 - (size_t) read: (void *)buf :(size_t)count
 {
 	assert(fd >= 0);
-	fprintf(stderr, "read\n");
 	return sock_read(fd, buf, count);
 }
 
 - (size_t) write: (void *)buf :(size_t)count
 {
 	assert(fd >= 0);
-	fprintf(stderr, "write\n");
 	return sock_write(fd, buf, count);
 }
 
@@ -272,7 +271,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	ev_io_set(&accept_event, listen_fd, EV_READ);
 	ev_io_start(&accept_event);
 
-	/* Notify a derived object on the bind. */
+	/* Notify a derived object on the bind event. */
 	[self onBind];
 }
 
@@ -397,6 +396,17 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 @end
 
 @implementation SingleWorkerService
+
++ (SingleWorkerService *) create: (const char *)name
+				:(int)port
+				:(single_worker_cb)cb
+{
+	struct service_config config;
+	tarantool_config_service(&config, name, port);
+	SingleWorkerService *service = [SingleWorkerService alloc];
+	[service init: &config :cb];
+	return service;
+}
 
 - (id) init: (struct service_config *)config :(single_worker_cb)cb_
 {

@@ -151,7 +151,13 @@ typedef void (*single_worker_cb)(SingleWorkerConnection *conn);
 @interface SingleWorkerService: Service {
 	single_worker_cb cb;
 }
+
++ (SingleWorkerService *) create: (const char *)name
+				:(int)port
+				:(single_worker_cb)cb;
+
 - (id) init: (struct service_config *)config :(single_worker_cb)cb;
+
 @end;
 
 /**
@@ -160,7 +166,9 @@ typedef void (*single_worker_cb)(SingleWorkerConnection *conn);
 @interface SingleWorkerConnection: Connection {
 	struct fiber *worker;
 }
+
 - (void) start: (single_worker_cb)cb;
+
 @end
 
 /**

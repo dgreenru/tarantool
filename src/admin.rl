@@ -121,12 +121,9 @@ admin_dispatch(Connection *conn, lua_State *L)
 	char *strstart, *strend;
 	bool state;
 
-	fprintf(stderr, "admin reading...\n");
 	while ((pe = memchr(fiber->rbuf->data, '\n', fiber->rbuf->size)) == NULL) {
 		[conn coReadAhead: fiber->rbuf :1];
-		fprintf(stderr, "%s\n", (char*) fiber->rbuf->data);
 	}
-	fprintf(stderr, "admin executing...\n");
 
 	pe++;
 	p = fiber->rbuf->data;
@@ -257,7 +254,6 @@ admin_dispatch(Connection *conn, lua_State *L)
 		end(out);
 	}
 
-	fprintf(stderr, "admin writing...\n");
 	[conn write: out->data :out->size];
 }
 
@@ -279,7 +275,6 @@ admin_handler(Connection *conn)
 		}
 	}
 	@catch (SocketEOF *eof) {
-		fprintf(stderr, "EOF\n");
 		(void) eof;
 	}
 	@finally {
@@ -293,10 +288,10 @@ int
 admin_init(void)
 {
 	@try {
-		struct service_config config;
-		tarantool_config_service(&config, "admin", cfg.admin_port);
-		admin_service = [SingleWorkerService alloc];
-		[admin_service init: &config :admin_handler];
+		admin_service =
+			[SingleWorkerService create: "admin"
+						   :cfg.admin_port
+						   :admin_handler];
 		[admin_service start];
 		return 0;
 	}
