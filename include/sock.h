@@ -35,6 +35,9 @@
 @interface SocketEOF: SocketError
 @end
 
+int sock_peer_name(int fd, struct sockaddr_in *addr);
+int sock_address_string(struct sockaddr_in *addr, char *str, size_t len);
+
 void sock_nonblocking(int fd);
 
 int sock_connect(struct sockaddr_in *addr);

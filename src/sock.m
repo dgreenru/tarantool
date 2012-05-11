@@ -32,6 +32,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
 
 #include <say.h>
 #include <fiber.h>
@@ -86,6 +87,31 @@ sock_accept(int sockfd)
 		tnt_raise(SocketError, :"accept");
 	}
 	return fd;
+}
+
+/**
+ * Get socket peer name.
+ */
+int
+sock_peer_name(int fd, struct sockaddr_in *addr)
+{
+	socklen_t addrlen = sizeof(*addr);
+	if (getpeername(fd, (struct sockaddr *)addr, &addrlen) < 0)
+		return -1;
+	if (addr->sin_addr.s_addr == 0)
+		return -1;
+	return 0;
+}
+
+/**
+ * Convert address to a string.
+ */
+int
+sock_address_string(struct sockaddr_in *addr, char *str, size_t len)
+{
+	return snprintf(str, len, "%s:%d",
+			inet_ntoa(addr->sin_addr),
+			ntohs(addr->sin_port));
 }
 
 /**
@@ -332,3 +358,4 @@ sock_write(int fd, void *buf, size_t count)
 	}
 	return total;
 }
+

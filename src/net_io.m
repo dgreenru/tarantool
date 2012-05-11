@@ -27,6 +27,8 @@
 #include <sock.h>
 #include <tarantool.h>
 
+#include <sysexits.h>
+
 /* {{{ Event Handlers. ********************************************/
 
 static void
@@ -73,32 +75,186 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 /* }}} */
 
-/* {{{ Abstract Service and Connection. ***************************/
+/* {{{ Generic Network Service. ***********************************/
 
-@implementation Connection
+@implementation Service
 
-- (id) init
+- (id) init: (const char *)name :(int)port
+{
+	struct service_config config;
+	tarantool_config_service(&config, name, port);
+	return [self init: &config];
+}
+
+- (id) init: (struct service_config *)config
 {
 	self = [super init];
 	if (self) {
-		fd = -1;
+		listen_fd = -1;
+		ev_init_timer_handler(&timer_event, self);
+		ev_init_input_handler(&accept_event, self);
+		memcpy(&service_config, config, sizeof(service_config));
+		snprintf(service_name, sizeof(service_name), "%i/%s",
+			 ntohs(service_config.addr.sin_port),
+			 service_config.name);
 	}
 	return self;
 }
 
-- (void) open: (Service *)service_ :(int)fd_
+- (const char *) name
 {
-	assert(fd == -1);
+	return service_name;
+}
+
+- (int) port
+{
+	return ntohs(service_config.addr.sin_port);
+}
+
+- (int) readahead
+{
+	return service_config.readahead;
+}
+
+- (bool) bind
+{
+	@try {
+		/* Bind the server socket and start listening. */
+		listen_fd = sock_create_server(&service_config.addr,
+					       service_config.listen_backlog);
+
+		/* Register the socket with event loop. */
+		ev_io_set(&accept_event, listen_fd, EV_READ);
+		ev_io_start(&accept_event);
+
+		/* Notify a derived object on the bind event. */
+		[self onBind];
+
+		return true;
+	}
+	@catch (SocketError *e) {
+		if (service_config.bind_retry || e->error == EADDRINUSE) {
+			return false;
+		}
+		[e log];
+	}
+	@catch (id e) {
+		(void) e;
+	}
+
+	/* Failed to bind the socket. */
+	say_error("init server socket on port %i fail", [self port]);
+	exit(EX_OSERR);
+}
+
+- (void) start
+{
+	assert(listen_fd == -1);
+	if (![self bind]) {
+		/* Retry mode, try again after delay. */
+		say_warn("port %i is already in use, will "
+			 "retry binding after %lf seconds.",
+			 [self port], service_config.bind_delay);
+		ev_timer_set(&timer_event,
+			     service_config.bind_delay,
+			     service_config.bind_delay);
+		ev_timer_start(&timer_event);
+	}
+}
+
+- (void) stop
+{
+	if (listen_fd == -1) {
+		ev_timer_stop(&timer_event);
+	} else {
+		ev_io_stop(&accept_event);
+		close(listen_fd);
+		listen_fd = -1;
+	}
+}
+
+- (void) onTimer
+{
+	assert(listen_fd == -1);
+	if ([self bind]) {
+		ev_timer_stop(&timer_event);
+	}
+}
+
+- (void) onInput
+{
+	assert(listen_fd >= 0);
+	@try {
+		int fd = sock_accept_client(listen_fd);
+		if (fd >= 0) {
+			Connection *conn = [self allocConnection];
+			conn = [conn init: self :fd];
+			[self onConnect: conn];
+		}
+	}
+	@catch (SocketError *e) {
+		[e log];
+	}
+}
+
+- (void) onBind
+{
+	/* No-op by default, override in a derived class if needed. */
+}
+
+- (Connection *) allocConnection
+{
+	return [self subclassResponsibility: _cmd];
+}
+
+- (void) onConnect: (Connection *) conn
+{
+	(void) conn;
+	[self subclassResponsibility: _cmd];
+}
+
+@end
+
+/* }}} */
+
+/* {{{ Abstract Network Connection. *******************************/
+
+@implementation Connection
+
+- (id) init: (Service *)service_ :(int)fd_
+{
 	assert(fd_ >= 0);
 
-	service = service_;
-	fd = fd_;
+	self = [super init];
+	if (self) {
+		service = service_;
+		fd = fd_;
 
-	ev_init_input_handler(&input, self);
-	ev_io_set(&input, fd, EV_READ);
+		snprintf(name, sizeof(name), "%i/handler", [service port]);
 
-	ev_init_output_handler(&output, self);
-	ev_io_set(&output, fd, EV_WRITE);
+		ev_init_input_handler(&input, self);
+		ev_io_set(&input, fd, EV_READ);
+
+		ev_init_output_handler(&output, self);
+		ev_io_set(&output, fd, EV_WRITE);
+	}
+	return self;
+}
+
+- (const char *) name
+{
+	return name;
+}
+
+- (void) start: (struct fiber *) worker_
+{
+	assert(fd >= 0);
+
+	worker = worker_;
+	worker->conn = self;
+	worker->has_peer = true;
+
+	fiber_call(worker);
 }
 
 - (void) close
@@ -111,6 +267,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	close(fd);
 	fd = -1;
 }
+
 
 - (void) startInput
 {
@@ -199,7 +356,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count
 {
-	size_t max_count = MAX(min_count, [service getReadAhead]);
+	size_t max_count = MAX(min_count, [service readahead]);
 	tbuf_ensure(buf, max_count);
 	buf->size += [self coRead: buf->data + buf->size :min_count :max_count];
 }
@@ -241,121 +398,73 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 @end
 
-@implementation Service
+/* }}} */
 
-- (id) init: (struct service_config *)config
+/* {{{ IProto Service. ********************************************/
+
+@implementation IProtoService
+
+- (Connection *) allocConnection
 {
-	return [self init: config :[Connection class]];
+	return [IProtoConnection alloc];
 }
 
-- (id) init: (struct service_config *)config :(Class)conn
+- (void) onConnect: (Connection *) conn
 {
-	self = [super init];
-	if (self) {
-		listen_fd = -1;
-		conn_class = conn;
-		ev_init_timer_handler(&timer_event, self);
-		ev_init_input_handler(&accept_event, self);
-		memcpy(&service_config, config, sizeof(service_config));
+	// TODO: use pool of worker fibers
+	
+	/* Create the worker fiber. */
+	struct fiber *worker = fiber_create("TODO", -1,
+					    (void (*)(void *)) iproto_interact,
+					    conn);
+	if (worker == NULL) {
+		say_error("can't create handler fiber, "
+			  "dropping client connection");
+		[conn close];
+		[conn free];
+		return;
 	}
-	return self;
+
+	/* Start the worker fiber. It becomes the conn object owner
+	   and will have to close and free it before termination. */
+	[conn start: worker];
 }
 
-- (void) bind
+- (void) input: (Connection *) conn
 {
-	/* Bind the server socket and start listening. */
-	listen_fd = sock_create_server(&service_config.addr,
-				       service_config.listen_backlog);
-
-	/* Register the socket with event loop. */
-	ev_io_set(&accept_event, listen_fd, EV_READ);
-	ev_io_start(&accept_event);
-
-	/* Notify a derived object on the bind event. */
-	[self onBind];
+	// TODO: use non-blocking I/O
+	fiber_call(conn->worker);
 }
 
-- (void) start
+- (void) output: (Connection *) conn
 {
-	assert(listen_fd == -1);
-	@try {
-		[self bind];
-	}
-	@catch (SocketError *e) {
-		/* Failed to bind the socket. */
-		if (!service_config.bind_retry || e->error != EADDRINUSE) {
-			[e log];
-			@throw;
-		}
-
-		/* Retry mode, try again after delay. */
-		say_warn("port %i is already in use, will "
-			 "retry binding after %lf seconds.",
-			 ntohs(service_config.addr.sin_port),
-			 service_config.bind_delay);
-		ev_timer_set(&timer_event,
-			     service_config.bind_delay,
-			     service_config.bind_delay);
-		ev_timer_start(&timer_event);
-	}
+	// TODO: use non-blocking I/O
+	fiber_call(conn->worker);
 }
 
-- (void) stop
+- (void) process: (uint32_t) msg_code :(struct tbuf *) request
 {
-	if (listen_fd == -1) {
-		ev_timer_stop(&timer_event);
-	} else {
-		ev_io_stop(&accept_event);
-		close(listen_fd);
-		listen_fd = -1;
-	}
-}
-
-- (void) onTimer
-{
-	assert(listen_fd == -1);
-	@try {
-		[self bind];
-		ev_timer_stop(&timer_event);
-	}
-	@catch (SocketError *e) {
-		if (e->error != EADDRINUSE) {
-			[e log];
-			@throw;
-		}
-	}
-}
-
-- (void) onInput
-{
-	assert(listen_fd >= 0);
-	@try {
-		int fd = sock_accept_client(listen_fd);
-		if (fd >= 0) {
-			Connection *c = [conn_class new];
-			[c open: self :fd];
-			[self onConnect: c];
-		}
-	}
-	@catch (SocketError *e) {
-		[e log];
-	}
-}
-
-- (void) onBind
-{
-	/* No-op by default, override in a derived class if needed. */
-}
-
-- (void) onConnect: (Connection *)conn
-{
-	(void) conn;
+	(void) msg_code;
+	(void) request;
 	[self subclassResponsibility: _cmd];
 }
 
-- (int) getReadAhead
+@end
+
+/* }}} */
+
+/* {{{ IProto Connection. *****************************************/
+
+@implementation IProtoConnection
+
+- (void) onInput
 {
-	return service_config.readahead;
+	[((IProtoService *) service) input: self];
+}
+
+- (void) onOutput
+{
+	[((IProtoService *) service) output: self];
 }
 
 @end
@@ -363,37 +472,6 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 /* }}} */
 
 /* {{{ Single Worker Service and Connection. **********************/
-
-@implementation SingleWorkerConnection
-
-- (void) start: (single_worker_cb)cb
-{
-	/* Create the worker fiber. */
-	worker = fiber_create("TODO", -1, (void (*)(void *)) cb, self);
-	if (worker == NULL) {
-		say_error("can't create handler fiber, "
-			  "dropping client connection");
-		[self close];
-		[self free];
-		return;
-	}
-
-	/* Start the worker fiber. It becomes the conn object owner
-	   and will have to close and free it before termination. */
-	fiber_call(worker);
-}
-
-- (void) onInput
-{
-	fiber_call(worker);
-}
-
-- (void) onOutput
-{
-	fiber_call(worker);
-}
-
-@end
 
 @implementation SingleWorkerService
 
@@ -410,18 +488,50 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 - (id) init: (struct service_config *)config :(single_worker_cb)cb_
 {
-	self = [super init: config :[SingleWorkerConnection class]];
+	self = [super init: config];
 	if (self) {
 		cb = cb_;
 	}
 	return self;
 }
 
-- (void) onConnect: (SingleWorkerConnection *)conn
+- (Connection *) allocConnection
 {
-	[conn start: cb];
+	return [SingleWorkerConnection alloc];
 }
 
-/* }}} */
+- (void) onConnect: (Connection *) conn
+{
+	/* Create the worker fiber. */
+	struct fiber *worker = fiber_create("TODO", -1,
+					    (void (*)(void *)) cb, conn);
+	if (worker == NULL) {
+		say_error("can't create handler fiber, "
+			  "dropping client connection");
+		[conn close];
+		[conn free];
+		return;
+	}
+
+	/* Start the worker fiber. It becomes the conn object owner
+	   and will have to close and free it before termination. */
+	[conn start: worker];
+}
 
 @end
+
+@implementation SingleWorkerConnection
+
+- (void) onInput
+{
+	fiber_call(worker);
+}
+
+- (void) onOutput
+{
+	fiber_call(worker);
+}
+
+@end
+
+/* }}} */

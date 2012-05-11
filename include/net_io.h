@@ -25,14 +25,18 @@
  * SUCH DAMAGE.
  */
 
+#include <fiber.h>
+#include <iproto.h>
 #include <tarantool_ev.h>
 #include <third_party/queue.h>
 #include <util.h>
-#include <fiber.h>
+
 #include <stdbool.h>
 #include <netinet/in.h>
 
 #import <objc/Object.h>
+
+#define SERVICE_NAME_MAXLEN FIBER_NAME_MAXLEN
 
 STAILQ_HEAD(input_queue, input_buffer);
 struct input_buffer
@@ -72,6 +76,7 @@ void ev_init_timer_handler(ev_timer *watcher, id<TimerHandler> handler);
 void ev_init_input_handler(ev_io *watcher, id<InputHandler> handler);
 void ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler);
 
+
 struct service_config
 {
 	const char *name;
@@ -84,57 +89,71 @@ struct service_config
 
 /* Forward declarations */
 @class Connection;
+@class IProtoConnection;
 @class SingleWorkerConnection;
 
+
 /**
- * Network Service.
+ * Generic Network Service.
  */
 @interface Service: Object <TimerHandler, InputHandler> {
 	int listen_fd;
-	Class conn_class;
 	struct ev_timer timer_event;
 	struct ev_io accept_event;
 	struct service_config service_config;
+	char service_name[SERVICE_NAME_MAXLEN];
 }
 
-/** Entry points. */
+/* Entry points. */
+- (id) init: (const char *)name :(int)port;
 - (id) init: (struct service_config *)config;
-- (id) init: (struct service_config *)config :(Class)conn;
+- (const char *) name;
+- (int) port;
+- (int) readahead;
 - (void) start;
 - (void) stop;
 
-/** Extension points. */
+/* Extension points. */
 - (void) onBind;
-- (void) onConnect: (Connection *)conn;
+- (Connection *) allocConnection;
+- (void) onConnect: (Connection *) conn;
 
-/** Internal methods. */
-- (void) bind;
-- (int) getReadAhead;
+/* Internal methods. */
+- (bool) bind;
+
 @end
 
+
 /**
- * Network Connection.
+ * Abstract Network Connection.
  */
 @interface Connection: Object <InputHandler, OutputHandler> {
+@public
+	struct fiber *worker;
+@protected
 	int fd;
 	struct ev_io input;
 	struct ev_io output;
 	Service *service;
+	char name[SERVICE_NAME_MAXLEN];
 }
 
-- (void) open: (Service *)service :(int)fd;
+- (id) init: (Service *)service_ :(int)fd_;
+- (const char *) name;
+- (void) start: (struct fiber *) worker_;
 - (void) close;
 
+/* Event control */
 - (void) startInput;
 - (void) stopInput;
 - (void) startOutput;
 - (void) stopOutput;
 
-/** Non-blocking I/O */
+/* Non-blocking I/O */
 - (size_t) read: (void *)buf :(size_t)count;
 - (size_t) write: (void *)buf :(size_t)count;
 
-/** Co-operative blocking I/O */
+/* Co-operative blocking I/O */
 - (void) coRead: (void *)buf :(size_t)count;
 - (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count;
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
@@ -142,8 +161,37 @@ struct service_config
 
 @end
 
+
+/**
+ * IProto Service.
+ */
+@interface IProtoService: Service {
+}
+
+- (void) input: (Connection *) conn;
+- (void) output: (Connection *) conn;
+
+/* Extension point. */
+- (void) process: (uint32_t) msg_code :(struct tbuf *) request;
+
+@end
+
+
+/**
+ * IProto Connection.
+ */
+@interface IProtoConnection: Connection {
+	//struct request_queue queue;
+	//struct input_queue input_queue;
+	//struct output_queue output_queue;
+}
+
+@end
+
+
 /** Define the callback for single worker connections. */
 typedef void (*single_worker_cb)(SingleWorkerConnection *conn);
+
 
 /**
  * Service that creates connections with a single dedicated worker fiber.
@@ -152,41 +200,19 @@ typedef void (*single_worker_cb)(SingleWorkerConnection *conn);
 	single_worker_cb cb;
 }
 
+/** Factory method */
 + (SingleWorkerService *) create: (const char *)name
 				:(int)port
 				:(single_worker_cb)cb;
-
 - (id) init: (struct service_config *)config :(single_worker_cb)cb;
 
 @end;
 
+
 /**
  * Connection with a single dedicated worker fiber.
  */
-@interface SingleWorkerConnection: Connection {
-	struct fiber *worker;
-}
-
-- (void) start: (single_worker_cb)cb;
-
-@end
-
-/**
- *
- */
-@interface IProtoService: Service {
-}
-
-@end
-
-/**
- *
- */
-@interface IProtoConnection : Connection {
-	struct request_queue queue;
-	struct input_queue input_queue;
-	struct output_queue output_queue;
-}
+@interface SingleWorkerConnection: Connection
 
 @end
 
