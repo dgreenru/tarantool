@@ -136,10 +136,14 @@ struct service_config
 	struct ev_io output;
 	Service *service;
 	char name[SERVICE_NAME_MAXLEN];
+	char peer[SERVICE_NAME_MAXLEN];
+	u64 cookie;
 }
 
 - (id) init: (Service *)service_ :(int)fd_;
 - (const char *) name;
+- (const char *) peer;
+- (u64) cookie;
 - (void) start: (struct fiber *) worker_;
 - (void) close;
 

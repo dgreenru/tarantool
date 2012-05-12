@@ -29,6 +29,10 @@
 
 #include <sysexits.h>
 
+/* Surrogate peer names */
+#define DEFAULT_PEER "default"
+#define UNKNOWN_PEER "unknown"
+
 /* {{{ Event Handlers. ********************************************/
 
 static void
@@ -230,11 +234,21 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 		service = service_;
 		fd = fd_;
 
+		/* Set connection name. */
 		snprintf(name, sizeof(name), "%i/handler", [service port]);
 
+		/* Set default peer name. */
+		assert(strlen(DEFAULT_PEER) < sizeof(peer));
+		strcpy(peer, DEFAULT_PEER);
+
+		/* Set default cookie. */
+		cookie = 0;
+
+		/* Prepare for input events. */
 		ev_init_input_handler(&input, self);
 		ev_io_set(&input, fd, EV_READ);
 
+		/* Prepare for output events. */
 		ev_init_output_handler(&output, self);
 		ev_io_set(&output, fd, EV_WRITE);
 	}
@@ -246,13 +260,43 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	return name;
 }
 
+- (void) initPeer
+{
+	assert(fd >= 0);
+	/* Check if we already got the peer. */
+	if (strcmp(peer, DEFAULT_PEER) == 0) {
+		/* Get the peer address. */
+		struct sockaddr_in addr;
+		if (sock_peer_name(fd, &addr) < 0) {
+			/* Failed to get it, use a dummy name. */
+			assert(strlen(UNKNOWN_PEER) < sizeof(peer));
+			strcpy(peer, UNKNOWN_PEER);
+		} else {
+			/* Got it, initialize the peer data. */
+			sock_address_string(&addr, peer, sizeof(peer));
+			memcpy(&cookie, &addr, MIN(sizeof(addr), sizeof(cookie)));
+		}
+	}
+}
+
+- (const char *) peer
+{
+	[self initPeer];
+	return peer;
+}
+
+- (u64) cookie
+{
+	[self initPeer];
+	return cookie;
+}
+
 - (void) start: (struct fiber *) worker_
 {
 	assert(fd >= 0);
 
 	worker = worker_;
 	worker->conn = self;
-	worker->has_peer = true;
 
 	fiber_call(worker);
 }
@@ -414,7 +458,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	// TODO: use pool of worker fibers
 	
 	/* Create the worker fiber. */
-	struct fiber *worker = fiber_create("TODO", -1,
+	struct fiber *worker = fiber_create([conn name], -1,
 					    (void (*)(void *)) iproto_interact,
 					    conn);
 	if (worker == NULL) {
@@ -503,7 +547,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 - (void) onConnect: (Connection *) conn
 {
 	/* Create the worker fiber. */
-	struct fiber *worker = fiber_create("TODO", -1,
+	struct fiber *worker = fiber_create([conn name], -1,
 					    (void (*)(void *)) cb, conn);
 	if (worker == NULL) {
 		say_error("can't create handler fiber, "
