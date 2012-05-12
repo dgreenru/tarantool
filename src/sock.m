@@ -153,6 +153,19 @@ sock_enable_option(int fd, int level, int option)
 }
 
 /**
+ * Set a non-critical option for a socket.
+ */
+static inline void
+sock_enable_option_nc(int fd, int level, int option)
+{
+	int on = 1;
+	if (setsockopt(fd, level, option, &on, sizeof(on)) < 0) {
+		say_syserror("setsockopt(..., %s, ...)",
+			     sock_get_option_name(option));
+	}
+}
+
+/**
  * Reset linger option for a socket.
  */
 static inline void
@@ -172,13 +185,8 @@ sock_set_client_options(int fd)
 {
 	sock_nonblocking(fd);
 	/* These options are not critical, ignore the results. */
-	@try {
-		(void) sock_enable_option(fd, SOL_SOCKET, SO_KEEPALIVE);
-		(void) sock_enable_option(fd, IPPROTO_TCP, TCP_NODELAY);
-	}
-	@catch (SocketError *e) {
-		[e log];
-	}
+	sock_enable_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
+	sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
 }
 
 /**
@@ -201,12 +209,7 @@ sock_set_server_accepted_options(int fd)
 {
 	sock_nonblocking(fd);
 	/* This option is not critical, ignore the result. */
-	@try {
-		(void) sock_enable_option(fd, IPPROTO_TCP, TCP_NODELAY);
-	}
-	@catch (SocketError *e) {
-		[e log];
-	}
+	sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
 }
 
 static void
