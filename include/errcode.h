@@ -1,5 +1,5 @@
-#ifndef TARANTOOL_ERRCODE_H
-#define TARANTOOL_ERRCODE_H
+#ifndef TARANTOOL_ERRCODE_H_INCLUDED
+#define TARANTOOL_ERRCODE_H_INCLUDED
 /*
  * Redistribution and use in source and binary forms, with or
  * without modification, are permitted provided that the following
@@ -60,7 +60,7 @@ enum { TNT_ERRMSG_MAX = 512 };
 	/*  7 */_(ER_MEMORY_ISSUE,		1, "Failed to allocate %u bytes in %s for %s") \
 	/*  8 */_(ER_UNUSED8,			2, "Unused8") \
 	/*  9 */_(ER_INJECTION,			2, "Error injection '%s'") \
-	/* 10 */_(ER_UNSUPPORTED,		2, "Unsupported") \
+	/* 10 */_(ER_UNSUPPORTED,		2, "%s does not support %s") \
 		/* silverproxy error codes */ \
 	/* 11 */_(ER_RESERVED11,		0, "Reserved11") \
 	/* 12 */_(ER_RESERVED12,		0, "Reserved12") \
@@ -99,7 +99,7 @@ enum { TNT_ERRMSG_MAX = 512 };
 	/* 44 */_(ER_UNKNOWN_UPDATE_OP,		2, "Unknown UPDATE operation") \
 	/* 45 */_(ER_EXACT_MATCH,		2, "Partial key in an exact match (key field count: %d, expected: %d)") \
 	/* 46 */_(ER_UNUSED46,			2, "Unused46") \
-	/* 47 */_(ER_KEY_CARDINALITY,		2, "Key cardinality %d is greater than index cardinality %d") \
+	/* 47 */_(ER_KEY_PART_COUNT,		2, "Key part count %d is greater than index part count %d") \
 	/* 48 */_(ER_PROC_RET,			2, "Return type '%s' is not supported in the binary protocol") \
 	/* 49 */_(ER_TUPLE_NOT_FOUND,		2, "Tuple doesn't exist") \
 	/* 50 */_(ER_NO_SUCH_PROC,		2, "Procedure '%.*s' is not defined") \
@@ -145,4 +145,4 @@ static inline const char *tnt_errcode_desc(uint32_t errcode)
 }
 
 
-#endif /* TARANTOOL_ERRCODE_H */
+#endif /* TARANTOOL_ERRCODE_H_INCLUDED */

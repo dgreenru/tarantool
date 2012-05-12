@@ -30,7 +30,6 @@
 #include "pickle.h"
 #include "exception.h"
 #include "box.h"
-#include "salloc.h"
 #include "assoc.h"
 
 const char *field_data_type_strs[] = {"NUM", "NUM64", "STR", "\0"};
@@ -132,10 +131,16 @@ iterator_first_equal(struct iterator *it)
 	return NULL;
 }
 
-- (struct box_tuple *) find: (void *) key :(int) key_cardinality
+- (struct box_tuple *) findByKey: (void *) key :(int) part_count
+{
+	[self checkKeyParts: part_count :false];
+	return [self findUnsafe: key :part_count];
+}
+
+- (struct box_tuple *) findUnsafe: (void *) key :(int) part_count
 {
 	(void) key;
-	(void) key_cardinality;
+	(void) part_count;
 	[self subclassResponsibility: _cmd];
 	return NULL;
 }
@@ -174,16 +179,33 @@ iterator_first_equal(struct iterator *it)
 	[self subclassResponsibility: _cmd];
 }
 
-- (void) initIterator: (struct iterator *) iterator :(enum iterator_type) type
-                        :(void *) key
-			:(int) key_cardinality
+- (void) initIteratorByKey: (struct iterator *) iterator :(enum iterator_type) type
+                        :(void *) key :(int) part_count
+{
+	[self checkKeyParts: part_count :true];
+	[self initIteratorUnsafe: iterator :type :key :part_count];
+}
+
+- (void) initIteratorUnsafe: (struct iterator *) iterator :(enum iterator_type) type
+                        :(void *) key :(int) part_count
 {
 	(void) iterator;
 	(void) type;
 	(void) key;
-	(void) key_cardinality;
+	(void) part_count;
 	[self subclassResponsibility: _cmd];
 }
+
+- (void) checkKeyParts: (int) part_count :(bool) partial_key_allowed
+{
+	if (part_count > key_def->part_count)
+		tnt_raise(ClientError, :ER_KEY_PART_COUNT,
+			  part_count, key_def->part_count);
+	if (!partial_key_allowed && part_count < key_def->part_count)
+		tnt_raise(ClientError, :ER_EXACT_MATCH,
+			  part_count, key_def->part_count);
+}
+
 @end
 
 /* }}} */
@@ -224,7 +246,7 @@ void
 hash_iterator_free(struct iterator *iterator)
 {
 	assert(iterator->next == hash_iterator_next);
-	sfree(iterator);
+	free(iterator);
 }
 
 
@@ -263,13 +285,13 @@ hash_iterator_free(struct iterator *iterator)
 
 - (struct box_tuple *) min
 {
-	tnt_raise(ClientError, :ER_UNSUPPORTED);
+	tnt_raise(ClientError, :ER_UNSUPPORTED, "Hash index", "min()");
 	return NULL;
 }
 
 - (struct box_tuple *) max
 {
-	tnt_raise(ClientError, :ER_UNSUPPORTED);
+	tnt_raise(ClientError, :ER_UNSUPPORTED, "Hash index", "max()");
 	return NULL;
 }
 
@@ -280,12 +302,12 @@ hash_iterator_free(struct iterator *iterator)
 	if (field == NULL)
 		tnt_raise(ClientError, :ER_NO_SUCH_FIELD,
 			  key_def->parts[0].fieldno);
-	return [self find :field :1];
+	return [self findUnsafe :field :1];
 }
 
 - (struct iterator *) allocIterator
 {
-	struct hash_iterator *it = salloc(sizeof(struct hash_iterator));
+	struct hash_iterator *it = malloc(sizeof(struct hash_iterator));
 	if (it) {
 		memset(it, 0, sizeof(struct hash_iterator));
 		it->base.next = hash_iterator_next;
@@ -293,6 +315,14 @@ hash_iterator_free(struct iterator *iterator)
 	}
 	return (struct iterator *) it;
 }
+
+- (void) checkKeyParts: (int) part_count :(bool) partial_key_allowed
+{
+	/* Hash indexes never allow partial keys. */
+	(void) partial_key_allowed;
+	[super checkKeyParts: part_count :false];
+}
+
 @end
 
 /* }}} */
@@ -300,20 +330,11 @@ hash_iterator_free(struct iterator *iterator)
 /* {{{ Hash32Index ************************************************/
 
 static u32
-int32_key_to_value(void *key, int key_cardinality)
+int32_key_to_value(void *key)
 {
-	if (key_cardinality > 1)
-		tnt_raise(ClientError, :ER_KEY_CARDINALITY,
-			  key_cardinality, 1);
-
-	if (key_cardinality < 1)
-		tnt_raise(ClientError, :ER_EXACT_MATCH,
-			  key_cardinality, 1);
-
 	u32 key_size = load_varint32(&key);
 	if (key_size != 4)
 		tnt_raise(ClientError, :ER_KEY_FIELD_TYPE, "u32");
-
 	return *((u32 *) key);
 }
 
@@ -346,10 +367,12 @@ int32_key_to_value(void *key, int key_cardinality)
 	return mh_size(int_hash);
 }
 
-- (struct box_tuple *) find: (void *) key :(int) key_cardinality
+- (struct box_tuple *) findUnsafe: (void *) key :(int) part_count
 {
+	(void) part_count;
+
 	struct box_tuple *ret = NULL;
-	u32 num = int32_key_to_value(key, key_cardinality);
+	u32 num = int32_key_to_value(key);
 	mh_int_t k = mh_i32ptr_get(int_hash, num);
 	if (k != mh_end(int_hash))
 		ret = mh_value(int_hash, k);
@@ -362,7 +385,7 @@ int32_key_to_value(void *key, int key_cardinality)
 - (void) remove: (struct box_tuple *) tuple
 {
 	void *field = tuple_field(tuple, key_def->parts[0].fieldno);
-	u32 num = int32_key_to_value(field, 1);
+	u32 num = int32_key_to_value(field);
 	mh_int_t k = mh_i32ptr_get(int_hash, num);
 	if (k != mh_end(int_hash))
 		mh_i32ptr_del(int_hash, k);
@@ -375,7 +398,7 @@ int32_key_to_value(void *key, int key_cardinality)
 	:(struct box_tuple *) new_tuple
 {
 	void *field = tuple_field(new_tuple, key_def->parts[0].fieldno);
-	u32 num = int32_key_to_value(field, 1);
+	u32 num = int32_key_to_value(field);
 
 	if (old_tuple != NULL) {
 		void *old_field = tuple_field(old_tuple,
@@ -408,17 +431,17 @@ int32_key_to_value(void *key, int key_cardinality)
 	it->hash = int_hash;
 }
 
-- (void) initIterator: (struct iterator *) iterator :(enum iterator_type) type
-                        :(void *) key
-			:(int) key_cardinality
+- (void) initIteratorUnsafe: (struct iterator *) iterator :(enum iterator_type) type
+                        :(void *) key :(int) part_count
 {
-	assert(iterator->next == hash_iterator_next);
-	struct hash_iterator *it = hash_iterator(iterator);
-
+	(void) part_count;
 	if (type == ITER_REVERSE)
 		tnt_raise(IllegalParams, :"hash iterator is forward only");
 
-	u32 num = int32_key_to_value(key, key_cardinality);
+	assert(iterator->next == hash_iterator_next);
+	struct hash_iterator *it = hash_iterator(iterator);
+
+	u32 num = int32_key_to_value(key);
 	it->base.next_equal = iterator_first_equal;
 	it->h_pos = mh_i32ptr_get(int_hash, num);
 	it->hash = int_hash;
@@ -430,20 +453,11 @@ int32_key_to_value(void *key, int key_cardinality)
 /* {{{ Hash64Index ************************************************/
 
 static u64
-int64_key_to_value(void *key, int key_cardinality)
+int64_key_to_value(void *key)
 {
-	if (key_cardinality > 1)
-		tnt_raise(ClientError, :ER_KEY_CARDINALITY,
-			  key_cardinality, 1);
-
-	if (key_cardinality < 1)
-		tnt_raise(ClientError, :ER_EXACT_MATCH,
-			  key_cardinality, 1);
-
 	u32 key_size = load_varint32(&key);
 	if (key_size != 8)
 		tnt_raise(ClientError, :ER_KEY_FIELD_TYPE, "u64");
-
 	return *((u64 *) key);
 }
 
@@ -474,10 +488,12 @@ int64_key_to_value(void *key, int key_cardinality)
 	return mh_size(int64_hash);
 }
 
-- (struct box_tuple *) find: (void *) key :(int) key_cardinality
+- (struct box_tuple *) findUnsafe: (void *) key :(int) part_count
 {
+	(void) part_count;
+
 	struct box_tuple *ret = NULL;
-	u64 num = int64_key_to_value(key, key_cardinality);
+	u64 num = int64_key_to_value(key);
 	mh_int_t k = mh_i64ptr_get(int64_hash, num);
 	if (k != mh_end(int64_hash))
 		ret = mh_value(int64_hash, k);
@@ -490,7 +506,7 @@ int64_key_to_value(void *key, int key_cardinality)
 - (void) remove: (struct box_tuple *) tuple
 {
 	void *field = tuple_field(tuple, key_def->parts[0].fieldno);
-	u64 num = int64_key_to_value(field, 1);
+	u64 num = int64_key_to_value(field);
 
 	mh_int_t k = mh_i64ptr_get(int64_hash, num);
 	if (k != mh_end(int64_hash))
@@ -504,7 +520,7 @@ int64_key_to_value(void *key, int key_cardinality)
 	:(struct box_tuple *) new_tuple
 {
 	void *field = tuple_field(new_tuple, key_def->parts[0].fieldno);
-	u64 num = int64_key_to_value(field, 1);
+	u64 num = int64_key_to_value(field);
 
 	if (old_tuple != NULL) {
 		void *old_field = tuple_field(old_tuple,
@@ -536,17 +552,17 @@ int64_key_to_value(void *key, int key_cardinality)
 	it->hash = (struct mh_i32ptr_t *) int64_hash;
 }
 
-- (void) initIterator: (struct iterator *) iterator :(enum iterator_type) type
-                        :(void *) key
-			:(int) key_cardinality
+- (void) initIteratorUnsafe: (struct iterator *) iterator :(enum iterator_type) type
+                        :(void *) key :(int) part_count
 {
-	assert(iterator->next == hash_iterator_next);
-	struct hash_iterator *it = hash_iterator(iterator);
-
+	(void) part_count;
 	if (type == ITER_REVERSE)
 		tnt_raise(IllegalParams, :"hash iterator is forward only");
 
-	u64 num = int64_key_to_value(key, key_cardinality);
+	assert(iterator->next == hash_iterator_next);
+	struct hash_iterator *it = hash_iterator(iterator);
+
+	u64 num = int64_key_to_value(key);
 
 	it->base.next_equal = iterator_first_equal;
 	it->h_pos = mh_i64ptr_get(int64_hash, num);
@@ -557,18 +573,6 @@ int64_key_to_value(void *key, int key_cardinality)
 /* }}} */
 
 /* {{{ HashStrIndex ***********************************************/
-
-static char *
-str_key_to_value(void *key, int key_cardinality)
-{
-	if (key_cardinality > 1)
-		tnt_raise(ClientError, :ER_KEY_CARDINALITY,
-			  key_cardinality, 1);
-	if (key_cardinality < 1)
-		tnt_raise(ClientError, :ER_EXACT_MATCH,
-			  key_cardinality, 1);
-	return key;
-}
 
 @interface HashStrIndex: HashIndex {
 	 struct mh_lstrptr_t *str_hash;
@@ -597,11 +601,11 @@ str_key_to_value(void *key, int key_cardinality)
 	return mh_size(str_hash);
 }
 
-- (struct box_tuple *) find: (void *) key :(int) key_cardinality
+- (struct box_tuple *) findUnsafe: (void *) key :(int) part_count
 {
+	(void) part_count;
 	struct box_tuple *ret = NULL;
-	void *lstr = str_key_to_value(key, key_cardinality);
-	mh_int_t k = mh_lstrptr_get(str_hash, lstr);
+	mh_int_t k = mh_lstrptr_get(str_hash, key);
 	if (k != mh_end(str_hash))
 		ret = mh_value(str_hash, k);
 #ifdef DEBUG
@@ -664,19 +668,19 @@ str_key_to_value(void *key, int key_cardinality)
 	it->hash = (struct mh_i32ptr_t *) str_hash;
 }
 
-- (void) initIterator: (struct iterator *) iterator :(enum iterator_type) type
-                        :(void *) key
-			:(int) key_cardinality
+- (void) initIteratorUnsafe: (struct iterator *) iterator
+			:(enum iterator_type) type
+                        :(void *) key :(int) part_count
 {
-	assert(iterator->next == hash_iterator_next);
-	struct hash_iterator *it = hash_iterator(iterator);
-
+	(void) part_count;
 	if (type == ITER_REVERSE)
 		tnt_raise(IllegalParams, :"hash iterator is forward only");
 
-	void *lstr = str_key_to_value(key, key_cardinality);
+	assert(iterator->next == hash_iterator_next);
+	struct hash_iterator *it = hash_iterator(iterator);
+
 	it->base.next_equal = iterator_first_equal;
-	it->h_pos = mh_lstrptr_get(str_hash, lstr);
+	it->h_pos = mh_lstrptr_get(str_hash, key);
 	it->hash = (struct mh_i32ptr_t *) str_hash;
 }
 @end

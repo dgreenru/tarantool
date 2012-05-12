@@ -1,17 +1,14 @@
--- This function create new table with constants members. The run-time error
--- will be raised if attempting to change table members.
+-- This function creates a new table with constant members.
+-- A run-time error will be raised on attempt to change
+-- table members.
 local function create_const_table(table)
-    return setmetatable ({}, {
-			     __index = table,
-			     __newindex = function(table_arg,
-						   name_arg,
-						   value_arg)
-				 error("attempting to change constant " ..
-				       tostring(name_arg) ..
-				       " to "
-				       .. tostring(value_arg), 2)
-			     end
-			     })
+    local function newindex(table, name, value)
+        error("Attempt to change constant "..tostring(name)..
+              " to "..tostring(value))
+    end
+    return setmetatable({}, { __index = table,
+                              __newindex = newindex,
+                              __metatable = false })
 end
 
 --- box flags
@@ -28,15 +25,15 @@ box.flags = create_const_table(
 --
 --
 function box.select_limit(space, index, offset, limit, ...)
-    local cardinality = select('#', ...)
+    local part_count = select('#', ...)
     return box.process(17,
-                       box.pack('iiiiii'..string.rep('p', cardinality),
+                       box.pack('iiiiii'..string.rep('p', part_count),
                                  space,
                                  index,
                                  offset,
                                  limit,
                                  1, -- key count
-                                 cardinality, -- key cardinality
+                                 part_count, -- key part count
                                  ...))
 end
 
@@ -44,15 +41,15 @@ end
 --
 --
 function box.select(space, index, ...)
-    local cardinality = select('#', ...)
+    local part_count = select('#', ...)
     return box.process(17,
-                       box.pack('iiiiii'..string.rep('p', cardinality),
+                       box.pack('iiiiii'..string.rep('p', part_count),
                                  space,
                                  index,
                                  0, -- offset
                                  4294967295, -- limit
                                  1, -- key count
-                                 cardinality, -- key cardinality
+                                 part_count, -- key part count
                                  ...))
 end
 
@@ -79,49 +76,54 @@ end
 -- index is always 0. It doesn't accept compound keys
 --
 function box.delete(space, ...)
-    local cardinality = select('#', ...)
+    local part_count = select('#', ...)
     return box.process(21,
-                       box.pack('iii'..string.rep('p', cardinality),
+                       box.pack('iii'..string.rep('p', part_count),
                                  space,
                                  box.flags.BOX_RETURN_TUPLE,  -- flags
-                                 cardinality, -- key cardinality
+                                 part_count, -- key part count
                                  ...))
 end
 
 -- insert or replace a tuple
 function box.replace(space, ...)
-    local cardinality = select('#', ...)
+    local part_count = select('#', ...)
     return box.process(13,
-                       box.pack('iii'..string.rep('p', cardinality),
+                       box.pack('iii'..string.rep('p', part_count),
                                  space,
                                  box.flags.BOX_RETURN_TUPLE,  -- flags
-                                 cardinality, -- cardinality
+                                 part_count, -- key part count
                                  ...))
 end
 
 -- insert a tuple (produces an error if the tuple already exists)
 function box.insert(space, ...)
-    local cardinality = select('#', ...)
+    local part_count = select('#', ...)
     return box.process(13,
-                       box.pack('iii'..string.rep('p', cardinality),
+                       box.pack('iii'..string.rep('p', part_count),
                                 space,
                                 bit.bor(box.flags.BOX_RETURN_TUPLE,
                                         box.flags.BOX_ADD),  -- flags
-                                cardinality, -- cardinality
+                                part_count, -- key part count
                                 ...))
 end
 
 --
 function box.update(space, key, format, ...)
     local op_count = select('#', ...)/2
-    return box.process(19,
-                       box.pack('iiipi'..format,
-                                  space,
-                                  1, -- flags, BOX_RETURN_TUPLE
-                                  1, -- cardinality
-                                  key, -- primary key
-                                  op_count, -- op count
-                                  ...))
+    if type(key) == 'table' then
+        part_count = #key
+        return box.process(19,
+                    box.pack('iii'..string.rep('p', part_count),
+                        space, box.flags.BOX_RETURN_TUPLE, part_count,
+                        unpack(key))..
+                    box.pack('i'..format, op_count, ...))
+    else
+        return box.process(19,
+                    box.pack('iiipi'..format,
+                        space, box.flags.BOX_RETURN_TUPLE, 1,
+                        key, op_count, ...))
+    end
 end
 
 box.upd = {}
@@ -201,7 +203,7 @@ function box.update_ol(space, ops_list, ...)
 
     -- fill UPDATE command key
     format = format .. 'i'
-    table.insert(args_list, #key) -- key cardinality
+    table.insert(args_list, #key) -- key part count
     for itr, val in ipairs(key) do
         format = format .. 'p'
         table.insert(args_list, val) -- key field
@@ -302,12 +304,12 @@ function box.on_reload_configuration()
     space_mt.replace = function(space, ...) return box.replace(space.n, ...) end
     space_mt.delete = function(space, ...) return box.delete(space.n, ...) end
     space_mt.truncate = function(space)
-        while true do
-            local k, v = space.index[0].idx:next()
-            if v == nil then
-                break
+        local pk = space.index[0].idx
+        local part_count = pk:part_count()
+        while #pk > 0 do
+            for k, v in pk.next, pk, nil do
+                space:delete(v:slice(0, part_count))
             end
-            space:delete(v[0])
         end
     end
     space_mt.pairs = function(space) return space.index[0]:pairs() end
@@ -323,18 +325,13 @@ function box.on_reload_configuration()
         end
     end
 end
-local initfile = io.open("init.lua")
-if initfile ~= nil then
-    io.close(initfile)
-    dofile("init.lua")
-end
--- 64bit operations support, etc.
-ffi = require("ffi")
+
 -- security: nullify some of the most serious os.* holes
---
 os.execute = nil
 os.exit = nil
 os.rename = nil
 os.tmpname = nil
 os.remove = nil
 require = nil
+
+-- vim: set et ts=4 sts

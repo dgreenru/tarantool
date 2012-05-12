@@ -38,6 +38,7 @@
 #include <util.h>
 #include <tbuf.h>
 #include <say.h>
+#include "exception.h"
 
 #define SLAB_ALIGN_PTR(ptr) (void *)((uintptr_t)(ptr) & ~(SLAB_SIZE - 1))
 
@@ -258,17 +259,18 @@ valid_item(struct slab *slab, void *item)
 #endif
 
 void *
-salloc(size_t size)
+salloc(size_t size, const char *what)
 {
 	struct slab_class *class;
 	struct slab *slab;
 	struct slab_item *item;
 
-	if ((class = class_for(size)) == NULL)
-		return NULL;
+	if ((class = class_for(size)) == NULL ||
+	    (slab = slab_of(class)) == NULL) {
 
-	if ((slab = slab_of(class)) == NULL)
-		return NULL;
+		tnt_raise(LoggedError, :ER_MEMORY_ISSUE, size,
+			  "slab allocator", what);
+	}
 
 	if (slab->free == NULL) {
 		assert(valid_item(slab, slab->brk));
@@ -349,8 +351,8 @@ slab_stat(struct tbuf *t)
 			    (int)slab_classes[i].item_size, slabs, items, used, free);
 
 	}
-	tbuf_printf(t, "  items_used: %.2f" CRLF, (double)total_used / arena.size * 100);
-	tbuf_printf(t, "  arena_used: %.2f" CRLF, (double)arena.used / arena.size * 100);
+	tbuf_printf(t, "  items_used: %.2f%%" CRLF, (double)total_used / arena.size * 100);
+	tbuf_printf(t, "  arena_used: %.2f%%" CRLF, (double)arena.used / arena.size * 100);
 }
 
 void

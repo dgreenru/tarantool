@@ -1,5 +1,13 @@
-add_library (misc STATIC crc32.c proctitle.c qsort_arg.c)
 
+if (NOT HAVE_MEMMEM)
+    set (misc_opt_sources ${misc_opt_sources} memmem.c)
+endif()
+
+if (NOT HAVE_MEMRCHR)
+    set (misc_opt_sources ${misc_opt_sources} memrchr.c)
+endif()
+
+add_library (misc STATIC crc32.c proctitle.c qsort_arg.c ${misc_opt_sources})
 if (NOT TARGET_OS_DEBIAN_FREEBSD) 
 	if (TARGET_OS_FREEBSD)
 	  set_source_files_properties(proctitle.c PROPERTIES
@@ -23,7 +31,8 @@ macro (luajit_build)
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/third_party/luajit
             COMMAND $(MAKE) clean
             COMMAND $(MAKE) -C src -t buildvm_x86.h buildvm_arm.h
-                            buildvm_x64.h buildvm_x64win.h
+                            buildvm_x64.h buildvm_x64win.h buildvm_ppc.h
+                            buildvm_ppcspe.h
             COMMAND $(MAKE) -C src ${luajit_buildoptions}
             DEPENDS ${CMAKE_SOURCE_DIR}/CMakeCache.txt
         )
@@ -36,7 +45,8 @@ macro (luajit_build)
             COMMAND cp -r ${PROJECT_SOURCE_DIR}/third_party/luajit/* .
             COMMAND $(MAKE) clean
             COMMAND $(MAKE) -C src -t buildvm_x86.h buildvm_arm.h
-                            buildvm_x64.h buildvm_x64win.h
+                            buildvm_x64.h buildvm_x64win.h buildvm_ppc.h
+                            buildvm_ppcspe.h
             COMMAND $(MAKE) -C src ${luajit_buildoptions}
             DEPENDS ${PROJECT_BINARY_DIR}/CMakeCache.txt ${PROJECT_BINARY_DIR}/third_party/luajit
         )

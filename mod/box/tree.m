@@ -26,7 +26,6 @@
 #include "tree.h"
 #include "box.h"
 #include "tuple.h"
-#include <salloc.h>
 #include <pickle.h>
 
 /* {{{ Utilities. *************************************************/
@@ -198,7 +197,7 @@ find_fixed_offset(struct space *space, int fieldno, int skip)
 
 	while (i < fieldno) {
 		/* if the field is unknown give up on it */
-		if (i >= space->field_count || space->field_types[i] == UNKNOWN) {
+		if (i >= space->max_fieldno || space->field_types[i] == UNKNOWN) {
 			return -1;
 		}
 
@@ -301,7 +300,7 @@ fold_with_sparse_parts(struct key_def *key_def, struct box_tuple *tuple, union s
 	memset(parts, 0, sizeof(parts[0]) * key_def->part_count);
 
 	for (int field = 0; field < key_def->max_fieldno; ++field) {
-		assert(field < tuple->cardinality);
+		assert(field < tuple->field_count);
 
 		u8 *data = part_data;
 		u32 len = load_varint32((void**) &data);
@@ -376,7 +375,7 @@ fold_with_dense_offset(struct key_def *key_def, struct box_tuple *tuple)
 	u8 *tuple_data = tuple->data;
 
 	for (int field = 0; field < key_def->max_fieldno; ++field) {
-		assert(field < tuple->cardinality);
+		assert(field < tuple->field_count);
 
 		u8 *data = tuple_data;
 		u32 len = load_varint32((void**) &data);
@@ -401,7 +400,7 @@ fold_with_num32_value(struct key_def *key_def, struct box_tuple *tuple)
 	u8 *tuple_data = tuple->data;
 
 	for (int field = 0; field < key_def->max_fieldno; ++field) {
-		assert(field < tuple->cardinality);
+		assert(field < tuple->field_count);
 
 		u8 *data = tuple_data;
 		u32 len = load_varint32((void**) &data);
@@ -542,8 +541,8 @@ dense_node_compare(struct key_def *key_def, u32 first_field,
 		   struct box_tuple *tuple_b, u32 offset_b)
 {
 	int part_count = key_def->part_count;
-	assert(first_field + part_count <= tuple_a->cardinality);
-	assert(first_field + part_count <= tuple_b->cardinality);
+	assert(first_field + part_count <= tuple_a->field_count);
+	assert(first_field + part_count <= tuple_b->field_count);
 
 	/* Allocate space for offsets. */
 	u32 *off_a = alloca(2 * part_count * sizeof(u32));
@@ -591,8 +590,8 @@ linear_node_compare(struct key_def *key_def,
 		    struct box_tuple *tuple_b, u32 offset_b)
 {
 	int part_count = key_def->part_count;
-	assert(first_field + part_count <= tuple_a->cardinality);
-	assert(first_field + part_count <= tuple_b->cardinality);
+	assert(first_field + part_count <= tuple_a->field_count);
+	assert(first_field + part_count <= tuple_b->field_count);
 
 	/* Compare key parts. */
 	u8 *ad = tuple_a->data + offset_a;
@@ -661,7 +660,7 @@ dense_key_node_compare(struct key_def *key_def,
 		       u32 first_field, struct box_tuple *tuple, u32 offset)
 {
 	int part_count = key_def->part_count;
-	assert(first_field + part_count <= tuple->cardinality);
+	assert(first_field + part_count <= tuple->field_count);
 
 	/* Allocate space for offsets. */
 	u32 *off = alloca(part_count * sizeof(u32));
@@ -706,7 +705,7 @@ linear_key_node_compare(struct key_def *key_def,
 			struct box_tuple *tuple, u32 offset)
 {
 	int part_count = key_def->part_count;
-	assert(first_field + part_count <= tuple->cardinality);
+	assert(first_field + part_count <= tuple->field_count);
 
 	/* Compare key parts. */
 	if (part_count > key_data->part_count)
@@ -801,7 +800,7 @@ tree_iterator_free(struct iterator *iterator)
 	if (it->iter)
 		sptree_index_iterator_free(it->iter);
 
-	sfree(it);
+	free(it);
 }
 
 /* }}} */
@@ -865,22 +864,14 @@ tree_iterator_free(struct iterator *iterator)
 	return [self unfold: node];
 }
 
-- (struct box_tuple *) find: (void *) key : (int) key_cardinality
+- (struct box_tuple *) findUnsafe: (void *) key : (int) part_count
 {
 	struct key_data *key_data
 		= alloca(sizeof(struct key_data) +
-			 _SIZEOF_SPARSE_PARTS(key_cardinality));
-
-	if (key_cardinality > key_def->part_count)
-		tnt_raise(ClientError, :ER_KEY_CARDINALITY,
-			  key_cardinality, key_def->part_count);
-
-	if (key_cardinality < key_def->part_count)
-		tnt_raise(ClientError, :ER_EXACT_MATCH,
-			  key_cardinality, key_def->part_count);
+			 _SIZEOF_SPARSE_PARTS(part_count));
 
 	key_data->data = key;
-	key_data->part_count = key_cardinality;
+	key_data->part_count = part_count;
 	fold_with_key_parts(key_def, key_data);
 
 	void *node = sptree_index_find(&tree, key_data);
@@ -890,10 +881,10 @@ tree_iterator_free(struct iterator *iterator)
 - (struct box_tuple *) findByTuple: (struct box_tuple *) tuple
 {
 	struct key_data *key_data
-		= alloca(sizeof(struct key_data) + _SIZEOF_SPARSE_PARTS(tuple->cardinality));
+		= alloca(sizeof(struct key_data) + _SIZEOF_SPARSE_PARTS(tuple->field_count));
 
 	key_data->data = tuple->data;
-	key_data->part_count = tuple->cardinality;
+	key_data->part_count = tuple->field_count;
 	fold_with_sparse_parts(key_def, tuple, key_data->parts);
 
 	void *node = sptree_index_find(&tree, key_data);
@@ -910,7 +901,7 @@ tree_iterator_free(struct iterator *iterator)
 - (void) replace: (struct box_tuple *) old_tuple
 		: (struct box_tuple *) new_tuple
 {
-	if (new_tuple->cardinality < key_def->max_fieldno)
+	if (new_tuple->field_count < key_def->max_fieldno)
 		tnt_raise(ClientError, :ER_NO_SUCH_FIELD,
 			  key_def->max_fieldno);
 
@@ -925,8 +916,9 @@ tree_iterator_free(struct iterator *iterator)
 
 - (struct iterator *) allocIterator
 {
+	assert(key_def->part_count);
 	struct tree_iterator *it
-		= salloc(sizeof(struct tree_iterator) + SIZEOF_SPARSE_PARTS(key_def));
+		= malloc(sizeof(struct tree_iterator) + SIZEOF_SPARSE_PARTS(key_def));
 
 	if (it) {
 		memset(it, 0, sizeof(struct tree_iterator));
@@ -938,18 +930,17 @@ tree_iterator_free(struct iterator *iterator)
 
 - (void) initIterator: (struct iterator *) iterator :(enum iterator_type) type
 {
-	[self initIterator: iterator :type :NULL :0];
+	[self initIteratorUnsafe: iterator :type :NULL :0];
 }
 
-- (void) initIterator: (struct iterator *) iterator :(enum iterator_type) type
-                        :(void *) key
-			:(int) key_cardinality
+- (void) initIteratorUnsafe: (struct iterator *) iterator :(enum iterator_type) type
+                        :(void *) key :(int) part_count
 {
 	assert(iterator->free == tree_iterator_free);
 	struct tree_iterator *it = tree_iterator(iterator);
 
 	it->key_data.data = key;
-	it->key_data.part_count = key_cardinality;
+	it->key_data.part_count = part_count;
 	fold_with_key_parts(key_def, &it->key_data);
 
 	if (type == ITER_FORWARD) {

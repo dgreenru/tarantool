@@ -139,9 +139,11 @@ static int
 replication_relay_send_row(struct recovery_state *r __attribute__((unused)), struct tbuf *t);
 
 
-/*-----------------------------------------------------------------------------*/
-/* replication module                                                          */
-/*-----------------------------------------------------------------------------*/
+/*
+ * ------------------------------------------------------------------------
+ * replication module
+ * ------------------------------------------------------------------------
+ */
 
 /** Check replication module configuration. */
 int
@@ -558,7 +560,6 @@ replication_relay_loop(int client_sock)
 {
 	char name[FIBER_NAME_MAXLEN];
 	struct sigaction sa;
-	struct recovery_state *log_io;
 	struct tbuf *ver;
 	i64 lsn;
 	ssize_t r;
@@ -596,7 +597,7 @@ replication_relay_loop(int client_sock)
 		}
 		panic("invalid LSN request size: %zu", r);
 	}
-	say_info("starting recovery from lsn:%"PRIi64, lsn);
+	say_info("starting replication from lsn: %"PRIi64, lsn);
 
 	ver = tbuf_alloc(fiber->gc_pool);
 	tbuf_append(ver, &default_version, sizeof(default_version));
@@ -615,12 +616,10 @@ replication_relay_loop(int client_sock)
 	/* Initialize the recovery process */
 	recovery_init(NULL, cfg.wal_dir, replication_relay_send_row,
 		      INT32_MAX, "fsync_delay", 0,
-		      RECOVER_READONLY, false);
+		      RECOVER_READONLY);
 
-	log_io = recovery_state;
-
-	recover(log_io, lsn);
-	recover_follow(log_io, 0.1);
+	recover(recovery_state, lsn);
+	recovery_follow_local(recovery_state, 0.1);
 
 	ev_loop(0);
 
