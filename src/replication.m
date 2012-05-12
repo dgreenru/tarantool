@@ -29,6 +29,7 @@
 #include TARANTOOL_CONFIG
 #include <palloc.h>
 #include <stddef.h>
+#include <sock.h>
 
 #include <stddef.h>
 #include <sys/types.h>
@@ -37,7 +38,6 @@
 #include <sys/uio.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include "fiber.h"
 
 /** Replication topology
  * ----------------------
@@ -67,6 +67,7 @@
  * children and exits.
  */
 static int master_to_spawner_sock;
+static int replication_relay_sock;
 
 /** replication_port acceptor fiber */
 static void
@@ -558,20 +559,24 @@ retry:
 static void
 replication_relay_loop(int client_sock)
 {
-	char name[FIBER_NAME_MAXLEN];
 	struct sigaction sa;
 	struct tbuf *ver;
 	i64 lsn;
 	ssize_t r;
 
-	fiber->has_peer = true;
-	fiber->fd = client_sock;
+	/* Initialize global. */
+	replication_relay_sock = client_sock;
 
 	/* set process title and fiber name */
-	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "relay/%s", fiber_peer_name(fiber));
-	fiber_set_name(fiber, name);
-	set_proc_title("%s%s", name, custom_proc_title);
+	struct sockaddr_in peer;
+	if (sock_peer_name(client_sock, &peer) == 0) {
+		char pname[FIBER_NAME_MAXLEN];
+		char fname[FIBER_NAME_MAXLEN];
+		sock_address_string(&peer, pname, sizeof(pname));
+		snprintf(fname, sizeof(fname), "relay/%s", pname);
+		fiber_set_name(fiber, fname);
+		set_proc_title("%s%s", fname, custom_proc_title);
+	}
 
 	/* init signals */
 	memset(&sa, 0, sizeof(sa));
@@ -590,7 +595,7 @@ replication_relay_loop(int client_sock)
 	if (sigaction(SIGPIPE, &sa, NULL) == -1)
 		say_syserror("sigaction");
 
-	r = read(fiber->fd, &lsn, sizeof(lsn));
+	r = read(client_sock, &lsn, sizeof(lsn));
 	if (r != sizeof(lsn)) {
 		if (r < 0) {
 			panic_syserror("read");
@@ -608,9 +613,7 @@ replication_relay_loop(int client_sock)
 
 	/* init read events */
 	struct ev_io sock_read_ev;
-	int sock_read_fd = fiber->fd;
-	sock_read_ev.data = (void *)&sock_read_fd;
-	ev_io_init(&sock_read_ev, replication_relay_recv, sock_read_fd, EV_READ);
+	ev_io_init(&sock_read_ev, replication_relay_recv, client_sock, EV_READ);
 	ev_io_start(&sock_read_ev);
 
 	/* Initialize the recovery process */
@@ -629,13 +632,12 @@ replication_relay_loop(int client_sock)
 
 /** Receive data event to replication socket handler */
 static void
-replication_relay_recv(struct ev_io *w, int __attribute__((unused)) revents)
+replication_relay_recv(struct ev_io *w __attribute__((unused)),
+		       int __attribute__((unused)) revents)
 {
-	int fd = *((int *)w->data);
 	u8 data;
 
-	int result = recv(fd, &data, sizeof(data), 0);
-
+	int result = recv(replication_relay_sock, &data, sizeof(data), 0);
 	if (result == 0 || (result < 0 && errno == ECONNRESET)) {
 		say_info("the client has closed its replication socket, exiting");
 		exit(EXIT_SUCCESS);
@@ -648,12 +650,13 @@ replication_relay_recv(struct ev_io *w, int __attribute__((unused)) revents)
 
 /** Send to row to client. */
 static int
-replication_relay_send_row(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
+replication_relay_send_row(struct recovery_state *r __attribute__((unused)),
+			   struct tbuf *t)
 {
 	u8 *data = t->data;
 	ssize_t bytes, len = t->size;
 	while (len > 0) {
-		bytes = write(fiber->fd, data, len);
+		bytes = write(replication_relay_sock, data, len);
 		if (bytes < 0) {
 			if (errno == EPIPE) {
 				/* socket closed on opposite site */
