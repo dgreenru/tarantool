@@ -28,18 +28,18 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 #include <fiber.h>
 #include <iproto.h>
-#include <tarantool_ev.h>
-#include <third_party/queue.h>
+#include <sock.h>
 #include <util.h>
+#include <tarantool_ev.h>
 
-#include <stdbool.h>
-#include <netinet/in.h>
+#include <third_party/queue.h>
 
 #import <objc/Object.h>
 
-#define SERVICE_NAME_MAXLEN FIBER_NAME_MAXLEN
+#define SERVICE_NAME_MAXLEN 32
 
 STAILQ_HEAD(input_queue, input_buffer);
 struct input_buffer
@@ -62,6 +62,7 @@ struct request
 	struct connection *connection;
 	struct fiber *worker;
 };
+
 
 @protocol TimerHandler
 - (void) onTimer;
@@ -90,10 +91,60 @@ struct service_config
 	int readahead;
 };
 
-/* Forward declarations */
-@class Connection;
+
+/* Forward declarations. */
+@class ServiceConnection;
 @class IProtoConnection;
-@class SingleWorkerConnection;
+
+
+/**
+ * Generic Network Connection.
+ */
+@interface Connection: Object <InputHandler, OutputHandler> {
+	int fd;
+	struct ev_io input;
+	struct ev_io output;
+}
+
+- (id) init: (int)fd_;
+- (void) close;
+
+/* Event control */
+- (void) startInput;
+- (void) stopInput;
+- (void) startOutput;
+- (void) stopOutput;
+
+/* Enable/Disable Blocking mode */
+- (void) setBlockingMode: (bool)blocking;
+
+/* I/O */
+- (size_t) read: (void *)buf :(size_t)count;
+- (size_t) write: (void *)buf :(size_t)count;
+
+@end
+
+
+/**
+ * Co-operative Network Connection.
+ */
+@interface CoConnection : Connection {
+	struct fiber *worker;
+}
+
+- (id) init: (int)fd_;
+
+- (void) attachWorker: (struct fiber *) worker_;
+- (void) detachWorker;
+
+- (void) coWork;
+
+/* Co-operative I/O */
+- (void) coRead: (void *)buf :(size_t)count;
+- (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count;
+- (void) coWrite: (void *)buf :(size_t)count;
+
+@end
 
 
 /**
@@ -118,25 +169,20 @@ struct service_config
 
 /* Extension points. */
 - (void) onBind;
-- (Connection *) allocConnection;
-- (void) onConnect: (Connection *) conn;
+- (ServiceConnection *) allocConnection;
+- (void) onConnect: (ServiceConnection *) conn;
 
 /* Internal methods. */
-- (bool) bind;
+//- (bool) bind;
 
 @end
 
 
 /**
- * Abstract Network Connection.
+ * Service network connection.
  */
-@interface Connection: Object <InputHandler, OutputHandler> {
+@interface ServiceConnection : CoConnection {
 @public
-	struct fiber *worker;
-@protected
-	int fd;
-	struct ev_io input;
-	struct ev_io output;
 	Service *service;
 	char name[SERVICE_NAME_MAXLEN];
 	char peer[SERVICE_NAME_MAXLEN];
@@ -147,24 +193,9 @@ struct service_config
 - (const char *) name;
 - (const char *) peer;
 - (u64) cookie;
-- (void) start: (struct fiber *) worker_;
-- (void) close;
 
-/* Event control */
-- (void) startInput;
-- (void) stopInput;
-- (void) startOutput;
-- (void) stopOutput;
-
-/* Non-blocking I/O */
-- (size_t) read: (void *)buf :(size_t)count;
-- (size_t) write: (void *)buf :(size_t)count;
-
-/* Co-operative blocking I/O */
-- (void) coRead: (void *)buf :(size_t)count;
-- (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count;
+- (void) startWorker: (struct fiber *) worker_;
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
-- (void) coWrite: (void *)buf :(size_t)count;
 
 @end
 
@@ -175,8 +206,8 @@ struct service_config
 @interface IProtoService: Service {
 }
 
-- (void) input: (Connection *) conn;
-- (void) output: (Connection *) conn;
+- (void) input: (IProtoConnection *) conn;
+- (void) output: (IProtoConnection *) conn;
 
 /* Extension point. */
 - (void) process: (uint32_t) msg_code :(struct tbuf *) request;
@@ -187,7 +218,7 @@ struct service_config
 /**
  * IProto Connection.
  */
-@interface IProtoConnection: Connection {
+@interface IProtoConnection: ServiceConnection {
 	//struct request_queue queue;
 	//struct input_queue input_queue;
 	//struct output_queue output_queue;
@@ -197,7 +228,7 @@ struct service_config
 
 
 /** Define the callback for single worker connections. */
-typedef void (*single_worker_cb)(SingleWorkerConnection *conn);
+typedef void (*single_worker_cb)(ServiceConnection *conn);
 
 
 /**
@@ -214,13 +245,5 @@ typedef void (*single_worker_cb)(SingleWorkerConnection *conn);
 - (id) init: (struct service_config *)config :(single_worker_cb)cb;
 
 @end;
-
-
-/**
- * Connection with a single dedicated worker fiber.
- */
-@interface SingleWorkerConnection: Connection
-
-@end
 
 #endif /* TARANTOOL_NET_IO_H_INCLUDED */

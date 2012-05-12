@@ -112,7 +112,7 @@ tarantool_info(struct tbuf *out)
 }
 
 static void
-admin_dispatch(Connection *conn, lua_State *L)
+admin_dispatch(ServiceConnection *conn, lua_State *L)
 {
 	struct tbuf *out = tbuf_alloc(fiber->gc_pool);
 	struct tbuf *err = tbuf_alloc(fiber->gc_pool);
@@ -262,7 +262,7 @@ admin_dispatch(Connection *conn, lua_State *L)
 static SingleWorkerService *admin_service;
 
 static void
-admin_handler(Connection *conn)
+admin_handler(ServiceConnection *conn)
 {
 	lua_State *L = lua_newthread(tarantool_L);
 	int coro_ref = luaL_ref(tarantool_L, LUA_REGISTRYINDEX);

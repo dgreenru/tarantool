@@ -83,6 +83,214 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 /* }}} */
 
+/* {{{ Generic Network Connection. ********************************/
+
+@implementation Connection
+
+- (id) init: (int)fd_
+{
+	assert(fd_ >= 0);
+
+	self = [super init];
+	if (self) {
+		/* Set socket fd. */
+		fd = fd_;
+
+		/* Prepare for input events. */
+		ev_init_input_handler(&input, self);
+		ev_io_set(&input, fd, EV_READ);
+
+		/* Prepare for output events. */
+		ev_init_output_handler(&output, self);
+		ev_io_set(&output, fd, EV_WRITE);
+	}
+	return self;
+}
+
+- (void) close
+{
+	assert(fd >= 0);
+
+	[self stopInput];
+	[self stopOutput];
+
+	close(fd);
+	fd = -1;
+}
+
+- (void) startInput
+{
+	ev_io_start(&input);
+}
+
+- (void) stopInput
+{
+	ev_io_stop(&input);
+}
+
+- (void) startOutput
+{
+	ev_io_start(&output);
+}
+
+- (void) stopOutput
+{
+	ev_io_stop(&output);
+}
+
+- (void) setBlockingMode: (bool)blocking
+{
+	assert(fd >= 0);
+	sock_blocking_mode(fd, blocking);
+}
+
+- (size_t) read: (void *)buf :(size_t)count
+{
+	assert(fd >= 0);
+	return sock_read(fd, buf, count);
+}
+
+- (size_t) write: (void *)buf :(size_t)count
+{
+	assert(fd >= 0);
+	return sock_write(fd, buf, count);
+}
+
+- (void) onInput
+{
+	[self subclassResponsibility: _cmd];
+}
+
+- (void) onOutput
+{
+	[self subclassResponsibility: _cmd];
+}
+
+@end
+
+/* }}} */
+
+/* {{{ Co-operative Network Connection. ***************************/
+
+@implementation CoConnection
+
+- (id) init: (int)fd_
+{
+	self = [super init: fd_];
+	[self setBlockingMode: false];
+	return self;
+}
+
+- (void) attachWorker: (struct fiber *) worker_
+{
+	assert(worker == NULL);
+	worker = worker_;
+}
+
+- (void) detachWorker
+{
+	assert(worker != NULL);
+	worker = NULL;
+}
+
+- (void) coWork
+{
+	assert(worker != NULL);
+	fiber_call(worker);
+}
+
+- (void) coRead: (void *)buf :(size_t)count
+{
+	[self startInput];
+	@try {
+		for (;;) {
+			/* Read as much data as possible. */
+			size_t n = [self read: buf :count];
+			if (n == count) {
+				break;
+			}
+
+			/* Go past the data just read. */
+			buf += n;
+			count -= n;
+
+			/* Yield control to other fibers. */
+			fiber_yield();
+			fiber_testcancel();
+		}
+	}
+	@finally {
+		[self stopInput];
+	}
+}
+
+- (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count
+{
+	assert(min_count <= max_count);
+	[self startInput];
+	@try {
+		size_t total = 0;
+		for (;;) {
+			/* Read as much data as possible. */
+			size_t n = [self read: buf :max_count];
+			if ((total += n) >= min_count) {
+				break;
+			}
+
+			/* Go past the data just read. */
+			buf += n;
+			max_count -= n;
+
+			/* Yield control to other fibers. */
+			fiber_yield();
+			fiber_testcancel();
+		}
+		return total;
+	}
+	@finally {
+		[self stopInput];
+	}
+}
+
+- (void) coWrite: (void *)buf :(size_t)count
+{
+	[self startOutput];
+	@try {
+		for (;;) {
+			/* Write as much data as possible. */
+			size_t n = [self write: buf :count];
+			if (n == count) {
+				break;
+			}
+
+			/* Go past the data just written. */
+			buf += n;
+			count -= n;
+
+			/* Yield control to other fibers. */
+			fiber_yield();
+			fiber_testcancel();
+		}
+	}
+	@finally {
+		[self stopOutput];
+	}
+}
+
+- (void) onInput
+{
+	[self coWork];
+}
+
+- (void) onOutput
+{
+	[self coWork];
+}
+
+@end
+
+/* }}} */
+
 /* {{{ Generic Network Service. ***********************************/
 
 @implementation Service
@@ -195,7 +403,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	@try {
 		int fd = sock_accept_client(listen_fd);
 		if (fd >= 0) {
-			Connection *conn = [self allocConnection];
+			ServiceConnection *conn = [self allocConnection];
 			conn = [conn init: self :fd];
 			[self onConnect: conn];
 		}
@@ -210,12 +418,12 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	/* No-op by default, override in a derived class if needed. */
 }
 
-- (Connection *) allocConnection
+- (ServiceConnection *) allocConnection
 {
-	return [self subclassResponsibility: _cmd];
+	return [ServiceConnection alloc];
 }
 
-- (void) onConnect: (Connection *) conn
+- (void) onConnect: (ServiceConnection *) conn
 {
 	(void) conn;
 	[self subclassResponsibility: _cmd];
@@ -227,7 +435,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 /* {{{ Abstract Network Connection. *******************************/
 
-@implementation Connection
+@implementation ServiceConnection
 
 - (id) init: (Service *)service_ :(int)fd_
 {
@@ -295,111 +503,13 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	return cookie;
 }
 
-- (void) start: (struct fiber *) worker_
+- (void) startWorker: (struct fiber *) worker_
 {
 	assert(fd >= 0);
 
-	worker = worker_;
+	[self attachWorker: worker_];
 	worker->conn = self;
-
-	fiber_call(worker);
-}
-
-- (void) close
-{
-	assert(fd >= 0);
-
-	[self stopInput];
-	[self stopOutput];
-
-	close(fd);
-	fd = -1;
-}
-
-
-- (void) startInput
-{
-	ev_io_start(&input);
-}
-
-- (void) stopInput
-{
-	ev_io_stop(&input);
-}
-
-- (void) startOutput
-{
-	ev_io_start(&output);
-}
-
-- (void) stopOutput
-{
-	ev_io_stop(&output);
-}
-
-- (size_t) read: (void *)buf :(size_t)count
-{
-	assert(fd >= 0);
-	return sock_read(fd, buf, count);
-}
-
-- (size_t) write: (void *)buf :(size_t)count
-{
-	assert(fd >= 0);
-	return sock_write(fd, buf, count);
-}
-
-- (void) coRead: (void *)buf :(size_t)count
-{
-	[self startInput];
-	@try {
-		for (;;) {
-			/* Read as much data as possible. */
-			size_t n = [self read: buf :count];
-			if (n == count) {
-				break;
-			}
-
-			/* Go past the data just read. */
-			buf += n;
-			count -= n;
-
-			/* Yield control to other fibers. */
-			fiber_yield();
-			fiber_testcancel();
-		}
-	}
-	@finally {
-		[self stopInput];
-	}
-}
-
-- (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count
-{
-	assert(min_count <= max_count);
-	[self startInput];
-	@try {
-		size_t total = 0;
-		for (;;) {
-			/* Read as much data as possible. */
-			size_t n = [self read: buf :max_count];
-			if ((total += n) >= min_count) {
-				break;
-			}
-
-			/* Go past the data just read. */
-			buf += n;
-			max_count -= n;
-
-			/* Yield control to other fibers. */
-			fiber_yield();
-			fiber_testcancel();
-		}
-		return total;
-	}
-	@finally {
-		[self stopInput];
-	}
+	[self coWork];
 }
 
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count
@@ -407,41 +517,6 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	size_t max_count = MAX(min_count, [service readahead]);
 	tbuf_ensure(buf, max_count);
 	buf->size += [self coRead: buf->data + buf->size :min_count :max_count];
-}
-
-- (void) coWrite: (void *)buf :(size_t)count
-{
-	[self startOutput];
-	@try {
-		for (;;) {
-			/* Write as much data as possible. */
-			size_t n = [self write: buf :count];
-			if (n == count) {
-				break;
-			}
-
-			/* Go past the data just written. */
-			buf += n;
-			count -= n;
-
-			/* Yield control to other fibers. */
-			fiber_yield();
-			fiber_testcancel();
-		}
-	}
-	@finally {
-		[self stopOutput];
-	}
-}
-
-- (void) onInput
-{
-	[self subclassResponsibility: _cmd];
-}
-
-- (void) onOutput
-{
-	[self subclassResponsibility: _cmd];
 }
 
 @end
@@ -475,19 +550,19 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 	/* Start the worker fiber. It becomes the conn object owner
 	   and will have to close and free it before termination. */
-	[conn start: worker];
+	[((IProtoConnection *) conn) startWorker: worker];
 }
 
-- (void) input: (Connection *) conn
+- (void) input: (IProtoConnection *) conn
 {
 	// TODO: use non-blocking I/O
-	fiber_call(conn->worker);
+	[conn coWork];
 }
 
-- (void) output: (Connection *) conn
+- (void) output: (IProtoConnection *) conn
 {
 	// TODO: use non-blocking I/O
-	fiber_call(conn->worker);
+	[conn coWork];
 }
 
 - (void) process: (uint32_t) msg_code :(struct tbuf *) request
@@ -543,12 +618,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	return self;
 }
 
-- (Connection *) allocConnection
-{
-	return [SingleWorkerConnection alloc];
-}
-
-- (void) onConnect: (Connection *) conn
+- (void) onConnect: (ServiceConnection *) conn
 {
 	/* Create the worker fiber. */
 	struct fiber *worker = fiber_create([conn name], -1,
@@ -563,21 +633,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 	/* Start the worker fiber. It becomes the conn object owner
 	   and will have to close and free it before termination. */
-	[conn start: worker];
-}
-
-@end
-
-@implementation SingleWorkerConnection
-
-- (void) onInput
-{
-	fiber_call(worker);
-}
-
-- (void) onOutput
-{
-	fiber_call(worker);
+	[conn startWorker: worker];
 }
 
 @end
