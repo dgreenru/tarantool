@@ -254,7 +254,7 @@ admin_dispatch(Connection *conn, lua_State *L)
 		end(out);
 	}
 
-	[conn write: out->data :out->size];
+	[conn coWrite: out->data :out->size];
 }
 
 /* {{{ Admin Service. *********************************************/
