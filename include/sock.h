@@ -38,7 +38,10 @@
 int sock_peer_name(int fd, struct sockaddr_in *addr);
 int sock_address_string(struct sockaddr_in *addr, char *str, size_t len);
 
-void sock_nonblocking(int fd);
+#define sock_blocking(fd) sock_blocking_mode(fd, true)
+#define sock_nonblocking(fd) sock_blocking_mode(fd, false)
+
+void sock_blocking_mode(int fd, bool blocking);
 
 int sock_connect(struct sockaddr_in *addr);
 int sock_create_server(struct sockaddr_in *addr, int backlog);

@@ -115,16 +115,22 @@ sock_address_string(struct sockaddr_in *addr, char *str, size_t len)
 }
 
 /**
- * Set non-blocking mode for a socket.
+ * Set blocking mode for a socket.
  */
 void
-sock_nonblocking(int fd)
+sock_blocking_mode(int fd, bool blocking)
 {
 	int flags = fcntl(fd, F_GETFL, 0);
 	if (flags < 0) {
 		tnt_raise(SocketError, :"fcntl(..., F_GETFL, ...)");
 	}
-	flags |= O_NONBLOCK;
+
+	if (blocking) {
+		flags &= ~O_NONBLOCK;
+	} else {
+		flags |= O_NONBLOCK;
+	}
+
 	if (fcntl(fd, F_SETFL, flags) < 0) {
 		tnt_raise(SocketError, :"fcntl(..., F_SETFL, ...)");
 	}
