@@ -508,7 +508,6 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	assert(fd >= 0);
 
 	[self attachWorker: worker_];
-	worker->conn = self;
 	[self coWork];
 }
 
