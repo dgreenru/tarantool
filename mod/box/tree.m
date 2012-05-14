@@ -24,8 +24,9 @@
  */
 
 #include "tree.h"
-#include "box.h"
 #include "tuple.h"
+#include "space.h"
+#include "exception.h"
 #include <pickle.h>
 
 /* {{{ Utilities. *************************************************/
@@ -49,7 +50,7 @@ u64_cmp(u64 a, u64 b)
 }
 
 /**
- * Tuple addrress comparison.
+ * Tuple address comparison.
  */
 static inline int
 ta_cmp(struct box_tuple *tuple_a, struct box_tuple *tuple_b)

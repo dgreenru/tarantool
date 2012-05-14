@@ -1,8 +1,6 @@
-#ifndef INCLUDES_TARANTOOL_MOD_BOX_LUA_H
-#define INCLUDES_TARANTOOL_MOD_BOX_LUA_H
+#ifndef TARANTOOL_BOX_TXN_H_INCLUDED
+#define TARANTOOL_BOX_TXN_H_INCLUDED
 /*
- * Copyright (C) 2011 Yuriy Vostrikov
- * Copyright (C) 2011 Konstantin Osipov
  * Redistribution and use in source and binary forms, with or
  * without modification, are permitted provided that the following
  * conditions are met:
@@ -30,20 +28,22 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-struct tbuf;
+#include <fiber.h>
 struct box_txn;
 struct box_tuple;
-struct lua_State;
 
-/**
- * Invoke a Lua stored procedure from the binary protocol
- * (implementation of 'CALL' command code).
- */
-void do_call(struct box_txn *txn, struct tbuf *req);
-/**
- * Create an instance of Lua interpreter in box.
- */
-void box_lua_init();
+/** tuple's flags */
+enum tuple_flags {
+	/** Waiting on WAL write to complete. */
+	WAL_WAIT = 0x1,
+	/** A new primary key is created but not yet written to WAL. */
+	GHOST = 0x2,
+};
 
-struct box_tuple *lua_istuple(struct lua_State *L, int narg);
-#endif /* INCLUDES_TARANTOOL_MOD_BOX_LUA_H */
+static inline struct box_txn *in_txn() { return fiber->mod_data.txn; }
+struct box_txn *txn_begin();
+void txn_commit(struct box_txn *txn);
+void txn_rollback(struct box_txn *txn);
+void txn_ref_tuple(struct box_txn *txn, struct box_tuple *tuple);
+void txn_lock_tuple(struct box_txn *txn, struct box_tuple *tuple);
+#endif /* TARANTOOL_BOX_TXN_H_INCLUDED */

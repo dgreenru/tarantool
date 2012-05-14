@@ -24,8 +24,9 @@
  * SUCH DAMAGE.
  */
 #include "tarantool.h"
-#include "box.h"
-#include "mod/box/tuple.h"
+#include "request.h"
+#include "txn.h"
+#include "tuple.h"
 #include "fiber.h"
 #include "cfg/warning.h"
 #include "cfg/tarantool_box_cfg.h"
@@ -33,6 +34,8 @@
 #include "stat.h"
 #include "salloc.h"
 #include "pickle.h"
+#include "space.h"
+#include "port.h"
 
 #define STAT(_)					\
         _(MEMC_GET, 1)				\
@@ -102,7 +105,7 @@ store(void *key, u32 exptime, u32 flags, u32 bytes, u8 *data)
 		  key_len, key_len, (u8 *)key, exptime, flags, cas);
 
 	struct box_txn *txn = txn_begin();
-	txn->out = &box_out_quiet;
+	txn->port = &port_null;
 	/*
 	 * Use a box dispatch wrapper which handles correctly
 	 * read-only/read-write modes.
@@ -123,7 +126,7 @@ delete(void *key)
 	tbuf_append_field(req, key);
 
 	struct box_txn *txn = txn_begin();
-	txn->out = &box_out_quiet;
+	txn->port = &port_null;
 
 	rw_callback(DELETE, req);
 }
@@ -204,7 +207,7 @@ print_stats()
 void memcached_get(struct box_txn *txn, size_t keys_count, struct tbuf *keys,
 		   bool show_cas)
 {
-	txn->op = SELECT;
+	txn->type = SELECT;
 	stat_collect(stat_base, MEMC_GET, 1);
 	stats.cmd_get++;
 	say_debug("ensuring space for %"PRI_SZ" keys", keys_count);
@@ -258,7 +261,7 @@ void memcached_get(struct box_txn *txn, size_t keys_count, struct tbuf *keys,
 		stats.get_hits++;
 		stat_collect(stat_base, MEMC_GET_HIT, 1);
 
-		tuple_txn_ref(txn, tuple);
+		txn_ref_tuple(txn, tuple);
 
 		if (show_cas) {
 			struct tbuf *b = tbuf_alloc(fiber->gc_pool);
