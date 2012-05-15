@@ -118,6 +118,8 @@ struct fiber *fiber_create(const char *name, int fd, void (*f) (void *), void *)
 void fiber_set_name(struct fiber *fiber, const char *name);
 void wait_for_child(pid_t pid);
 
+void fiber_io_wait(int fd, int events);
+
 void
 fiber_io_start(int fd, int events);
 

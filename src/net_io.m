@@ -31,6 +31,8 @@
 #include <sock.h>
 #include <tarantool.h>
 
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sysexits.h>
 
 /* Surrogate peer names */
@@ -174,14 +176,32 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 @implementation CoConnection
 
-- (id) init: (int)fd_
++ (CoConnection *) connect: (struct sockaddr_in *)addr
 {
-	self = [super init: fd_];
-	[self setBlockingMode: false];
-	return self;
+	int fd = sock_create();
+	@try {
+		sock_nonblocking(fd);
+		/* These options are not critical, ignore the results. */
+		sock_enable_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
+		sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
+
+		if (sock_connect(fd, addr) < 0) {
+			assert(errno == EINPROGRESS);
+			fiber_io_wait(fd, EV_WRITE);
+			sock_connect_inprogress(fd);
+		}
+
+		CoConnection *conn = [CoConnection alloc];
+		[conn init: fd];
+		return conn;
+	}
+	@catch (id) {
+		close(fd);
+		@throw;
+	}
 }
 
-- (void) attachWorker: (struct fiber *) worker_
+- (void) attachWorker: (struct fiber *)worker_
 {
 	assert(worker == NULL);
 	worker = worker_;
@@ -277,6 +297,18 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	}
 }
 
+- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count
+{
+	[self coReadAhead: buf :min_count :(16 * 1024)];
+}
+
+- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count :(size_t)readahead
+{
+	size_t max_count = MAX(min_count, readahead);
+	tbuf_ensure(buf, max_count);
+	buf->size += [self coRead: buf->data + buf->size :min_count :max_count];
+}
+
 - (void) onInput
 {
 	[self coWork];
@@ -291,16 +323,9 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 /* }}} */
 
-/* {{{ Generic Network Service. ***********************************/
+/* {{{ Connection Acceptor. ***************************************/
 
-@implementation Service
-
-- (id) init: (const char *)name :(int)port
-{
-	struct service_config config;
-	tarantool_config_service(&config, name, port);
-	return [self init: &config];
-}
+@implementation Acceptor
 
 - (id) init: (struct service_config *)config
 {
@@ -310,26 +335,8 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 		ev_init_timer_handler(&timer_event, self);
 		ev_init_input_handler(&accept_event, self);
 		memcpy(&service_config, config, sizeof(service_config));
-		snprintf(service_name, sizeof(service_name), "%i/%s",
-			 ntohs(service_config.addr.sin_port),
-			 service_config.name);
 	}
 	return self;
-}
-
-- (const char *) name
-{
-	return service_name;
-}
-
-- (int) port
-{
-	return ntohs(service_config.addr.sin_port);
-}
-
-- (int) readahead
-{
-	return service_config.readahead;
 }
 
 - (bool) bind
@@ -338,6 +345,8 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 		/* Bind the server socket and start listening. */
 		listen_fd = sock_create_server(&service_config.addr,
 					       service_config.listen_backlog);
+
+		say_info("bound to port %i", [self port]);
 
 		/* Register the socket with event loop. */
 		ev_io_set(&accept_event, listen_fd, EV_READ);
@@ -366,6 +375,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 - (void) start
 {
 	assert(listen_fd == -1);
+
 	if (![self bind]) {
 		/* Retry mode, try again after delay. */
 		say_warn("port %i is already in use, will "
@@ -389,9 +399,15 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	}
 }
 
+- (int) port
+{
+	return ntohs(service_config.addr.sin_port);
+}
+
 - (void) onTimer
 {
 	assert(listen_fd == -1);
+
 	if ([self bind]) {
 		ev_timer_stop(&timer_event);
 	}
@@ -400,15 +416,20 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 - (void) onInput
 {
 	assert(listen_fd >= 0);
+
+	int fd = -1;
 	@try {
-		int fd = sock_accept_client(listen_fd);
+		struct sockaddr_in addr;
+		socklen_t addrlen = sizeof(addr);
+		fd = sock_accept(listen_fd, &addr, &addrlen);
 		if (fd >= 0) {
-			ServiceConnection *conn = [self allocConnection];
-			conn = [conn init: self :fd];
-			[self onConnect: conn];
+			[self onAccept: fd :&addr];
 		}
 	}
 	@catch (SocketError *e) {
+		if (fd >= 0) {
+			close(fd);
+		}
 		[e log];
 	}
 }
@@ -418,12 +439,59 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	/* No-op by default, override in a derived class if needed. */
 }
 
+- (void) onAccept: (int)fd :(struct sockaddr_in *)addr
+{
+	(void) fd;
+	(void) addr;
+	[self subclassResponsibility: _cmd];
+}
+
+@end
+
+/* {{{ Generic Network Service. ***********************************/
+
+@implementation Service
+
+- (id) init: (const char *)name :(struct service_config *)config
+{
+	self = [super init: config];
+	if (self) {
+		snprintf(service_name, sizeof(service_name),
+			 "%i/%s", [self port], name);
+	}
+	return self;
+}
+
+- (const char *) name
+{
+	return service_name;
+}
+
+- (int) readahead
+{
+	return service_config.readahead;
+}
+
+- (void) onBind
+{
+	/* No-op by default, override in a derived class if needed. */
+}
+
+- (void) onAccept: (int)fd :(struct sockaddr_in *)addr
+{
+	(void)addr;
+	ServiceConnection *conn = [self allocConnection];
+	[conn init: self :fd];
+	[conn setBlockingMode: false];
+	[self onConnect: conn];
+}
+
 - (ServiceConnection *) allocConnection
 {
 	return [ServiceConnection alloc];
 }
 
-- (void) onConnect: (ServiceConnection *) conn
+- (void) onConnect: (ServiceConnection *)conn
 {
 	(void) conn;
 	[self subclassResponsibility: _cmd];
@@ -513,9 +581,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count
 {
-	size_t max_count = MAX(min_count, [service readahead]);
-	tbuf_ensure(buf, max_count);
-	buf->size += [self coRead: buf->data + buf->size :min_count :max_count];
+	[super coReadAhead: buf :min_count :[service readahead]];
 }
 
 @end
@@ -602,15 +668,17 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 				:(single_worker_cb)cb
 {
 	struct service_config config;
-	tarantool_config_service(&config, name, port);
+	tarantool_config_service(&config, port);
 	SingleWorkerService *service = [SingleWorkerService alloc];
-	[service init: &config :cb];
+	[service init: name :&config :cb];
 	return service;
 }
 
-- (id) init: (struct service_config *)config :(single_worker_cb)cb_
+- (id) init: (const char *)name
+	   :(struct service_config *)config
+	   :(single_worker_cb)cb_
 {
-	self = [super init: config];
+	self = [super init: name :config];
 	if (self) {
 		cb = cb_;
 	}

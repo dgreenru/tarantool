@@ -326,6 +326,18 @@ ev_schedule(ev_watcher *watcher, int event __attribute__((unused)))
 	fiber_call(watcher->data);
 }
 
+void
+fiber_io_wait(int fd, int events)
+{
+	ev_io io;
+	ev_io_init(&io, (void *)ev_schedule, fd, events);
+	io.data = fiber;
+	ev_io_start(&io);
+	fiber_yield();
+	ev_io_stop(&io);
+	fiber_testcancel();
+}
+
 struct fiber *
 fiber_find(int fid)
 {
@@ -817,7 +829,7 @@ tcp_server_handler(void *data)
 		fiber_io_yield();
 
 		@try {
-			while ((fd = sock_accept_client(fiber->fd)) >= 0) {
+			while ((fd = sock_accept(fiber->fd, NULL, NULL)) >= 0) {
 				snprintf(name, sizeof(name),
 					 "%i/handler", server->port);
 				struct fiber *h = fiber_create(name, fd,
@@ -890,6 +902,7 @@ fiber_serv_socket(struct fiber *fiber, unsigned short port, bool retry, ev_tstam
 again:
 	@try {
 		fiber->fd = sock_create_server(&sin, cfg.backlog);
+		say_info("bound to port %i", port);
 		return 0;
 	}
 	@catch (SocketError *e) {

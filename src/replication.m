@@ -24,6 +24,7 @@
  * SUCH DAMAGE.
  */
 #include <replication.h>
+#include <net_io.h>
 #include <say.h>
 #include <fiber.h>
 #include TARANTOOL_CONFIG
@@ -53,8 +54,8 @@
  * incoming connections. This is done in the master to be able to
  * correctly handle RELOAD CONFIGURATION, which happens in the
  * master, and, in future, perform authentication of replication
- * clients. Since the master uses fibers to serve all clients,
- * replication acceptor fiber is just one of many fibers in use.
+ * clients.
+ *
  * Once a client socket is accepted, it is sent to the spawner
  * process, through the master's end of the socket pair.
  *
@@ -68,17 +69,6 @@
  */
 static int master_to_spawner_sock;
 static int replication_relay_sock;
-
-/** replication_port acceptor fiber */
-static void
-acceptor_handler(void *data __attribute__((unused)));
-
-/** Send a file descriptor to replication relay spawner.
- *
- * @param client_sock the file descriptor to be sent.
- */
-static void
-acceptor_send_sock(int client_sock);
 
 /** Replication spawner process */
 static struct spawner {
@@ -146,6 +136,100 @@ replication_relay_send_row(struct recovery_state *r __attribute__((unused)), str
  * ------------------------------------------------------------------------
  */
 
+@interface ReplicaAcceptor: Acceptor <OutputHandler> {
+	int replica_sock;
+	ev_io send_event;
+}
+
+@end
+
+@implementation ReplicaAcceptor
+
+- (id) init: (struct service_config *)config
+{
+	self = [super init: config];
+	if (self) {
+		replica_sock = -1;
+		ev_init_output_handler(&send_event, self);
+		ev_io_set(&send_event, master_to_spawner_sock, EV_WRITE);
+	}
+	return self;
+}
+
+/** Send the file descriptor to replication relay spawner.
+ */
+- (bool) send
+{
+	struct msghdr msg;
+	struct iovec iov[1];
+	char control_buf[CMSG_SPACE(sizeof(int))];
+	struct cmsghdr *control_message = NULL;
+	int cmd_code = 0;
+
+	iov[0].iov_base = &cmd_code;
+	iov[0].iov_len = sizeof(cmd_code);
+
+	memset(&msg, 0, sizeof(msg));
+
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control_buf;
+	msg.msg_controllen = sizeof(control_buf);
+
+	control_message = CMSG_FIRSTHDR(&msg);
+	control_message->cmsg_len = CMSG_LEN(sizeof(int));
+	control_message->cmsg_level = SOL_SOCKET;
+	control_message->cmsg_type = SCM_RIGHTS;
+	*((int *) CMSG_DATA(control_message)) = replica_sock;
+
+	/* send client socket to the spawner */
+	int sent = sendmsg(master_to_spawner_sock, &msg, 0);
+	if (sent < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			return false;
+		}
+		say_syserror("sendmsg");
+	}
+
+	close(replica_sock);
+	return true;
+}
+
+- (void) onAccept: (int)fd :(struct sockaddr_in *)addr
+{
+	assert(replica_sock == -1);
+
+	say_info("connection from %s:%d",
+		 inet_ntoa(addr->sin_addr),
+		 ntohs(addr->sin_port));
+
+	sock_enable_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
+	ev_io_stop(&accept_event);
+	ev_io_start(&send_event);
+
+	replica_sock = fd;
+}
+
+- (void) onOutput
+{
+	assert(replica_sock >= 0);
+
+	if (![self send]) {
+		return;
+	}
+
+	ev_io_start(&accept_event);
+	ev_io_stop(&send_event);
+
+	replica_sock = -1;
+}
+
+@end
+
+static ReplicaAcceptor *replica_acceptor;
+
 /** Check replication module configuration. */
 int
 replication_check_config(struct tarantool_cfg *config)
@@ -212,107 +296,13 @@ replication_init()
 	if (cfg.replication_port == 0)
 		return;                        /* replication is not in use */
 
-	char fiber_name[FIBER_NAME_MAXLEN];
+	struct service_config config;
+	tarantool_config_service(&config, cfg.replication_port);
 
-	/* create acceptor fiber */
-	snprintf(fiber_name, FIBER_NAME_MAXLEN, "%i/replication", cfg.replication_port);
-
-	struct fiber *acceptor = fiber_create(fiber_name, -1, acceptor_handler, NULL);
-
-	if (acceptor == NULL) {
-		panic("create fiber fail");
-	}
-
-	fiber_call(acceptor);
+	replica_acceptor = [ReplicaAcceptor alloc];
+	[replica_acceptor init: &config];
+	[replica_acceptor start];
 }
-
-
-/*-----------------------------------------------------------------------------*/
-/* replication accept/sender fibers                                            */
-/*-----------------------------------------------------------------------------*/
-
-/** Replication acceptor fiber handler. */
-static void
-acceptor_handler(void *data __attribute__((unused)))
-{
-	if (fiber_serv_socket(fiber, cfg.replication_port, true, 0.1) != 0) {
-		panic("can not bind to replication port");
-	}
-
-	for (;;) {
-		struct sockaddr_in addr;
-		socklen_t addrlen = sizeof(addr);
-		int client_sock = -1;
-
-		/* wait new connection request */
-		fiber_io_start(fiber->fd, EV_READ);
-		fiber_io_yield();
-
-		/* accept connection */
-		client_sock = accept(fiber->fd, (struct sockaddr*)&addr,
-				     &addrlen);
-		if (client_sock == -1) {
-			if (errno == EAGAIN && errno == EWOULDBLOCK) {
-				continue;
-			}
-			panic_syserror("accept");
-		}
-
-		/* up SO_KEEPALIVE flag */
-		int keepalive = 1;
-		if (setsockopt(client_sock, SOL_SOCKET, SO_KEEPALIVE,
-			       &keepalive, sizeof(int)) < 0)
-			/* just print error, it's not critical error */
-			say_syserror("setsockopt()");
-
-		fiber_io_stop(fiber->fd, EV_READ);
-		say_info("connection from %s:%d", inet_ntoa(addr.sin_addr),
-			 ntohs(addr.sin_port));
-		acceptor_send_sock(client_sock);
-	}
-}
-
-
-/** Send a file descriptor to the spawner. */
-static void
-acceptor_send_sock(int client_sock)
-{
-	struct msghdr msg;
-	struct iovec iov[1];
-	char control_buf[CMSG_SPACE(sizeof(int))];
-	struct cmsghdr *control_message = NULL;
-	int cmd_code = 0;
-
-	iov[0].iov_base = &cmd_code;
-	iov[0].iov_len = sizeof(cmd_code);
-
-	memset(&msg, 0, sizeof(msg));
-
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-	msg.msg_control = control_buf;
-	msg.msg_controllen = sizeof(control_buf);
-
-	control_message = CMSG_FIRSTHDR(&msg);
-	control_message->cmsg_len = CMSG_LEN(sizeof(int));
-	control_message->cmsg_level = SOL_SOCKET;
-	control_message->cmsg_type = SCM_RIGHTS;
-	*((int *) CMSG_DATA(control_message)) = client_sock;
-
-	/* wait, when interprocess comm. socket is ready for write */
-	fiber_io_start(master_to_spawner_sock, EV_WRITE);
-	fiber_io_yield();
-	/* send client socket to the spawner */
-	if (sendmsg(master_to_spawner_sock, &msg, 0) < 0)
-		say_syserror("sendmsg");
-
-	fiber_io_stop(master_to_spawner_sock, EV_WRITE);
-	/* close client socket in the main process */
-	close(client_sock);
-}
-
 
 /*-----------------------------------------------------------------------------*/
 /* spawner process                                                             */

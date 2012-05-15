@@ -473,11 +473,8 @@ tarantool_free(void)
 }
 
 int
-tarantool_config_service(struct service_config *config,
-			 const char *name, int port)
+tarantool_config_service(struct service_config *config, int port)
 {
-	config->name = name;
-
 	config->addr.sin_family = AF_INET;
 	config->addr.sin_port = htons(port);
 	if (strcmp(cfg.bind_ipaddr, "INADDR_ANY") == 0) {

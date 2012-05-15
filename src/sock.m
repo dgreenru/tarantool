@@ -66,7 +66,7 @@ sock_get_option_name(int option)
 /**
  * Create a socket.
  */
-static inline int
+int
 sock_create(void)
 {
 	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -74,47 +74,6 @@ sock_create(void)
 		tnt_raise(SocketError, :"socket");
 	}
 	return fd;
-}
-
-/**
- * Accept a socket connection.
- */
-static inline int
-sock_accept(int sockfd)
-{
-	int fd = accept(sockfd, NULL, NULL);
-	if (fd < 0) {
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			return -1;
-		}
-		tnt_raise(SocketError, :"accept");
-	}
-	return fd;
-}
-
-/**
- * Get socket peer name.
- */
-int
-sock_peer_name(int fd, struct sockaddr_in *addr)
-{
-	socklen_t addrlen = sizeof(*addr);
-	if (getpeername(fd, (struct sockaddr *)addr, &addrlen) < 0)
-		return -1;
-	if (addr->sin_addr.s_addr == 0)
-		return -1;
-	return 0;
-}
-
-/**
- * Convert address to a string.
- */
-int
-sock_address_string(struct sockaddr_in *addr, char *str, size_t len)
-{
-	return snprintf(str, len, "%s:%d",
-			inet_ntoa(addr->sin_addr),
-			ntohs(addr->sin_port));
 }
 
 /**
@@ -142,7 +101,7 @@ sock_blocking_mode(int fd, bool blocking)
 /**
  * Set an option for a socket.
  */
-static inline void
+void
 sock_enable_option(int fd, int level, int option)
 {
 	int on = 1;
@@ -155,7 +114,7 @@ sock_enable_option(int fd, int level, int option)
 /**
  * Set a non-critical option for a socket.
  */
-static inline void
+void
 sock_enable_option_nc(int fd, int level, int option)
 {
 	int on = 1;
@@ -178,15 +137,42 @@ sock_reset_linger(int fd)
 }
 
 /**
- * Set options appropriate for a client socket.
+ * Connect a client socket to a server.
  */
-static void
-sock_set_client_options(int fd)
+int
+sock_connect(int fd, struct sockaddr_in *addr)
 {
-	sock_nonblocking(fd);
-	/* These options are not critical, ignore the results. */
-	sock_enable_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
-	sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
+	/* Establish the connection. */
+	if (connect(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+		/* Something went wrong... */
+		if (errno == EINPROGRESS) {
+			/* Connection has not concluded yet. */
+			return -1;
+		} else {
+			/* Connection has failed. */
+			tnt_raise(SocketError, :"connect");
+		}
+	}
+	return 0;
+}
+
+/**
+ * Complete inprogress connection.
+ */
+int
+sock_connect_inprogress(int fd)
+{
+	/* Get the connect() call result. */
+	int error = 0;
+	socklen_t error_size = sizeof(error);
+	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_size) < 0) {
+		tnt_raise(SocketError, :"getsockopt(..., SO_ERROR, ...)");
+	} else if (error_size != sizeof(error)) {
+		tnt_raise(SocketError, :EINVAL :"getsockopt(..., SO_ERROR, ...)");
+	} else if (error != 0) {
+		tnt_raise(SocketError, :error :"connect");
+	}
+	return 0;
 }
 
 /**
@@ -199,70 +185,6 @@ sock_set_server_options(int fd)
 	sock_enable_option(fd, SOL_SOCKET, SO_REUSEADDR);
 	sock_enable_option(fd, SOL_SOCKET, SO_KEEPALIVE);
 	sock_reset_linger(fd);
-}
-
-/**
- * Set options appropriate for an accepted server socket.
- */
-static void
-sock_set_server_accepted_options(int fd)
-{
-	sock_nonblocking(fd);
-	/* This option is not critical, ignore the result. */
-	sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
-}
-
-static void
-sock_connect_inprogress(int fd)
-{
-	/* Wait for the delayed connect() call result. */
-
-	// TODO: fd poll
-
-	fiber_yield();
-
-	/* Get the connect() call result. */
-	int error = 0;
-	socklen_t error_size = sizeof(error);
-	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_size) < 0) {
-		tnt_raise(SocketError, :"getsockopt(..., SO_ERROR, ...)");
-	} else if (error_size != sizeof(error)) {
-		tnt_raise(SocketError, :EINVAL :"getsockopt(..., SO_ERROR, ...)");
-	} else if (error != 0) {
-		tnt_raise(SocketError, :error :"connect");
-	}
-}
-
-/**
- * Create a client socket and connect to a server.
- */
-int
-sock_connect(struct sockaddr_in *addr)
-{
-	/* Create a socket. */
-	int fd = sock_create();
-	@try {
-		/* Set appropriate options. */
-		sock_set_client_options(fd);
-
-		/* Establish the connection. */
-		if (connect(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
-			/* Something went wrong... */
-			if (errno == EINPROGRESS) {
-				/* Connection has not concluded yet. */
-				sock_connect_inprogress(fd);
-			} else {
-				/* Connection has failed. */
-				tnt_raise(SocketError, :"connect");
-			}
-		}
-
-		return fd;
-	}
-	@catch (id e) {
-		close(fd);
-		@throw;
-	}
 }
 
 /**
@@ -297,23 +219,21 @@ sock_create_server(struct sockaddr_in *addr, int backlog)
  * Accept a client connection on a server socket.
  */
 int
-sock_accept_client(int sockfd)
+sock_accept(int sockfd, struct sockaddr_in *addr, socklen_t *addrlen)
 {
 	/* Accept a connection. */
-	int fd = sock_accept(sockfd);
+	int fd = accept(sockfd, addr, addrlen);
 	if (fd < 0) {
-		return fd;
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			return -1;
+		}
+		tnt_raise(SocketError, :"accept");
 	}
 
-	@try {
-		/* Set appropriate options. */
-		sock_set_server_accepted_options(fd);
-		return fd;
-	}
-	@catch (id e) {
-		close(fd);
-		@throw;
-	}
+	/* This option is not critical, ignore the result. */
+	sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
+
+	return fd;
 }
 
 /**
@@ -369,5 +289,30 @@ sock_write(int fd, void *buf, size_t count)
 		total += n;
 	}
 	return total;
+}
+
+/**
+ * Get socket peer name.
+ */
+int
+sock_peer_name(int fd, struct sockaddr_in *addr)
+{
+	socklen_t addrlen = sizeof(*addr);
+	if (getpeername(fd, (struct sockaddr *)addr, &addrlen) < 0)
+		return -1;
+	if (addr->sin_addr.s_addr == 0)
+		return -1;
+	return 0;
+}
+
+/**
+ * Convert address to a string.
+ */
+int
+sock_address_string(struct sockaddr_in *addr, char *str, size_t len)
+{
+	return snprintf(str, len, "%s:%d",
+			inet_ntoa(addr->sin_addr),
+			ntohs(addr->sin_port));
 }
 

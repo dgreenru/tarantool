@@ -38,76 +38,82 @@
 
 #include <say.h>
 #include <pickle.h>
+#include <net_io.h>
 
 static int
 remote_apply_row(struct recovery_state *r, struct tbuf *row);
 
-static struct tbuf *
-remote_row_reader_v11()
+static CoConnection *conn = nil;
+
+static void
+close_connection()
 {
-	ssize_t to_read = sizeof(struct row_v11) - fiber->rbuf->size;
+	[conn detachWorker];
+	[conn close];
+	[conn free];
+	conn = nil;
+}
 
-	if (to_read > 0 && fiber_bread(fiber->rbuf, to_read) <= 0)
-		goto error;
+static struct tbuf *
+remote_row_reader_v11(CoConnection *conn)
+{
+	@try {
+		ssize_t to_read = sizeof(struct row_v11) - fiber->rbuf->size;
+		if (to_read > 0) {
+			[conn coReadAhead: fiber->rbuf :to_read];
+		}
 
-	ssize_t request_len = row_v11(fiber->rbuf)->len + sizeof(struct row_v11);
-	to_read = request_len - fiber->rbuf->size;
+		ssize_t request_len = row_v11(fiber->rbuf)->len + sizeof(struct row_v11);
+		to_read = request_len - fiber->rbuf->size;
+		if (to_read > 0) {
+			[conn coReadAhead: fiber->rbuf :to_read];
+		}
 
-	if (to_read > 0 && fiber_bread(fiber->rbuf, to_read) <= 0)
-		goto error;
-
-	say_debug("read row bytes:%" PRI_SSZ, request_len);
-	return tbuf_split(fiber->rbuf, request_len);
-error:
-	say_error("unexpected eof reading row header");
-	return NULL;
+		say_warn("read row bytes:%" PRI_SSZ, request_len);
+		return tbuf_split(fiber->rbuf, request_len);
+	}
+	@catch (SocketEOF *) {
+		say_error("unexpected eof reading row header");
+		@throw;
+	}
 }
 
 static struct tbuf *
 remote_read_row(struct sockaddr_in *remote_addr, i64 initial_lsn)
 {
-	struct tbuf *row;
 	bool warning_said = false;
 	const int reconnect_delay = 1;
 	const char *err = NULL;
-	u32 version;
 
 	for (;;) {
-		if (fiber->fd < 0) {
-			if (fiber_connect(remote_addr) < 0) {
+		@try {
+			if (conn == nil) {
 				err = "can't connect to master";
-				goto err;
-			}
+				conn = [CoConnection connect: remote_addr];
+				[conn attachWorker: fiber];
 
-			if (fiber_write(&initial_lsn, sizeof(initial_lsn)) != sizeof(initial_lsn)) {
 				err = "can't write version";
-				goto err;
-			}
+				[conn coWrite: &initial_lsn :sizeof(initial_lsn)];
 
-			if (fiber_read(&version, sizeof(version)) != sizeof(version)) {
+				u32 version;
 				err = "can't read version";
-				goto err;
+				[conn coRead: &version :sizeof(version)];
+				if (version != default_version) {
+					err = "remote version mismatch";
+					goto err;
+				}
+
+				say_crit("successfully connected to master");
+				say_crit("starting replication from lsn:%" PRIi64, initial_lsn);
+				warning_said = false;
 			}
 
-			if (version != default_version) {
-				err = "remote version mismatch";
-				goto err;
-			}
-
-			say_crit("successfully connected to master");
-			say_crit("starting replication from lsn:%" PRIi64, initial_lsn);
-
-			warning_said = false;
-			err = NULL;
-		}
-
-		row = remote_row_reader_v11();
-		if (row == NULL) {
 			err = "can't read row";
-			goto err;
+			return remote_row_reader_v11(conn);
 		}
-
-		return row;
+		@catch (SocketError *e) {
+			[e log];
+		}
 
 	      err:
 		if (err != NULL && !warning_said) {
@@ -115,7 +121,8 @@ remote_read_row(struct sockaddr_in *remote_addr, i64 initial_lsn)
 			say_info("will retry every %i second", reconnect_delay);
 			warning_said = true;
 		}
-		fiber_close();
+
+		close_connection();
 		fiber_sleep(reconnect_delay);
 	}
 }
@@ -126,20 +133,25 @@ pull_from_remote(void *state)
 	struct recovery_state *r = state;
 	struct tbuf *row;
 
-	for (;;) {
-		fiber_setcancelstate(true);
-		row = remote_read_row(&r->remote_addr, r->confirmed_lsn + 1);
-		fiber_setcancelstate(false);
+	@try {
+		for (;;) {
+			fiber_setcancelstate(true);
+			row = remote_read_row(&r->remote_addr, r->confirmed_lsn + 1);
+			fiber_setcancelstate(false);
 
-		r->recovery_lag = ev_now() - row_v11(row)->tm;
-		r->recovery_last_update_tstamp = ev_now();
+			r->recovery_lag = ev_now() - row_v11(row)->tm;
+			r->recovery_last_update_tstamp = ev_now();
 
-		if (remote_apply_row(r, row) < 0) {
-			fiber_close();
-			continue;
+			if (remote_apply_row(r, row) < 0) {
+				close_connection();
+				continue;
+			}
+
+			fiber_gc();
 		}
-
-		fiber_gc();
+	}
+	@finally {
+		close_connection();
 	}
 }
 

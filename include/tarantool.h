@@ -56,7 +56,8 @@ void tarantool_free(void);
 char **init_set_proc_title(int argc, char **argv);
 void free_proc_title(int argc, char **argv);
 void set_proc_title(const char *format, ...);
+
 struct service_config;
-int tarantool_config_service(struct service_config *config,
-			     const char *name, int port);
+int tarantool_config_service(struct service_config *config, int port);
+
 #endif /* TARANTOOL_H_INCLUDED */

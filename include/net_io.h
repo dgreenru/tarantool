@@ -132,9 +132,9 @@ struct service_config
 	struct fiber *worker;
 }
 
-- (id) init: (int)fd_;
++ (CoConnection *) connect: (struct sockaddr_in *)addr;
 
-- (void) attachWorker: (struct fiber *) worker_;
+- (void) attachWorker: (struct fiber *)worker_;
 - (void) detachWorker;
 
 - (void) coWork;
@@ -144,36 +144,49 @@ struct service_config
 - (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count;
 - (void) coWrite: (void *)buf :(size_t)count;
 
+- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
+- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count :(size_t)readahead;
+
 @end
 
 
 /**
- * Generic Network Service.
+ * Connection Acceptor
  */
-@interface Service: Object <TimerHandler, InputHandler> {
+@interface Acceptor: Object <TimerHandler, InputHandler> {
 	int listen_fd;
 	struct ev_timer timer_event;
 	struct ev_io accept_event;
 	struct service_config service_config;
+}
+
+- (id) init: (struct service_config *)config;
+- (void) start;
+- (void) stop;
+
+- (int) port;
+
+/* Extension points. */
+- (void) onBind;
+- (void) onAccept: (int)fd :(struct sockaddr_in *)addr;
+
+@end
+
+/**
+ * Generic Network Service.
+ */
+@interface Service: Acceptor {
 	char service_name[SERVICE_NAME_MAXLEN];
 }
 
 /* Entry points. */
-- (id) init: (const char *)name :(int)port;
-- (id) init: (struct service_config *)config;
+- (id) init: (const char *)name :(struct service_config *)config;
 - (const char *) name;
-- (int) port;
 - (int) readahead;
-- (void) start;
-- (void) stop;
 
 /* Extension points. */
-- (void) onBind;
 - (ServiceConnection *) allocConnection;
-- (void) onConnect: (ServiceConnection *) conn;
-
-/* Internal methods. */
-//- (bool) bind;
+- (void) onConnect: (ServiceConnection *)conn;
 
 @end
 
@@ -182,7 +195,6 @@ struct service_config
  * Service network connection.
  */
 @interface ServiceConnection : CoConnection {
-@public
 	Service *service;
 	char name[SERVICE_NAME_MAXLEN];
 	char peer[SERVICE_NAME_MAXLEN];
@@ -242,7 +254,9 @@ typedef void (*single_worker_cb)(ServiceConnection *conn);
 + (SingleWorkerService *) create: (const char *)name
 				:(int)port
 				:(single_worker_cb)cb;
-- (id) init: (struct service_config *)config :(single_worker_cb)cb;
+- (id) init: (const char *)name
+	   :(struct service_config *)config
+	   :(single_worker_cb)cb;
 
 @end;
 
