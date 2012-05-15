@@ -174,8 +174,6 @@ ssize_t iov_flush(void);
 void iov_reset();
 
 const char *fiber_peer_name(struct fiber *fiber);
-ssize_t fiber_read(void *buf, size_t count);
-ssize_t fiber_write(const void *buf, size_t count);
 int fiber_close(void);
 void fiber_cleanup(void);
 void fiber_gc(void);
@@ -198,7 +196,6 @@ void fiber_testcancel(void);
  * fiber.
  */
 void fiber_setcancelstate(bool enable);
-int fiber_connect(struct sockaddr_in *addr);
 void fiber_sleep(ev_tstamp s);
 void fiber_info(struct tbuf *out);
 int set_nonblock(int sock);
