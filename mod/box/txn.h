@@ -29,8 +29,25 @@
  * SUCH DAMAGE.
  */
 #include <fiber.h>
-struct box_txn;
-struct box_tuple;
+struct tuple;
+@class Index;
+
+struct txn {
+	u16 type;
+	u32 flags;
+
+	struct lua_State *L;
+	struct port *port;
+	struct space *space;
+	Index *index;
+
+	struct tuple *old_tuple;
+	struct tuple *new_tuple;
+	struct tuple *lock_tuple;
+
+	struct tbuf req;
+};
+
 
 /** tuple's flags */
 enum tuple_flags {
@@ -40,10 +57,9 @@ enum tuple_flags {
 	GHOST = 0x2,
 };
 
-static inline struct box_txn *in_txn() { return fiber->mod_data.txn; }
-struct box_txn *txn_begin();
-void txn_commit(struct box_txn *txn);
-void txn_rollback(struct box_txn *txn);
-void txn_ref_tuple(struct box_txn *txn, struct box_tuple *tuple);
-void txn_lock_tuple(struct box_txn *txn, struct box_tuple *tuple);
+static inline struct txn *in_txn() { return fiber->mod_data.txn; }
+struct txn *txn_begin();
+void txn_commit(struct txn *txn);
+void txn_rollback(struct txn *txn);
+void txn_lock_tuple(struct txn *txn, struct tuple *tuple);
 #endif /* TARANTOOL_BOX_TXN_H_INCLUDED */

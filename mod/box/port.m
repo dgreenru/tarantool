@@ -28,9 +28,8 @@
  */
 #include "port.h"
 #include <pickle.h>
+#include <fiber.h>
 #include <tarantool_lua.h>
-#include "request.h"
-#include "txn.h"
 #include "tuple.h"
 #include "box_lua.h"
 #include "lua.h"
@@ -54,6 +53,18 @@
 */
 const int BOX_REF_THRESHOLD = 8196;
 
+static void
+port_unref(void *tuple)
+{
+	tuple_ref((struct tuple *) tuple, -1);
+}
+
+void
+port_ref(struct tuple *tuple)
+{
+	tuple_ref(tuple, 1);
+	fiber_register_cleanup(port_unref, tuple);
+}
 
 static void
 iov_add_u32(u32 *p_u32)
@@ -68,12 +79,12 @@ iov_dup_u32(u32 u32)
 }
 
 static void
-iov_add_tuple(struct box_tuple *tuple)
+iov_add_tuple(struct tuple *tuple)
 {
 	size_t len = tuple_len(tuple);
 
 	if (len > BOX_REF_THRESHOLD) {
-		txn_ref_tuple(in_txn(), tuple);
+		port_ref(tuple);
 		iov_add(&tuple->bsize, len);
 	} else {
 		iov_dup(&tuple->bsize, len);
@@ -151,7 +162,7 @@ iov_add_lua_table(struct lua_State *L, int index)
 void iov_add_ret(struct lua_State *L, int index)
 {
 	int type = lua_type(L, index);
-	struct box_tuple *tuple;
+	struct tuple *tuple;
 	switch (type) {
 	case LUA_TTABLE:
 	{
@@ -208,7 +219,7 @@ void iov_add_ret(struct lua_State *L, int index)
 		tnt_raise(ClientError, :ER_PROC_RET, lua_typename(L, type));
 		break;
 	}
-	txn_ref_tuple(in_txn(), tuple);
+	port_ref(tuple);
 	iov_add(&tuple->bsize, tuple_len(tuple));
 }
 
@@ -238,7 +249,7 @@ struct port port_iproto = {
 
 static void port_null_add_u32(u32 *p_u32 __attribute__((unused))) {}
 static void port_null_dup_u32(u32 u32 __attribute__((unused))) {}
-static void port_null_add_tuple(struct box_tuple *tuple __attribute__((unused))) {}
+static void port_null_add_tuple(struct tuple *tuple __attribute__((unused))) {}
 static void port_null_add_lua_multret(struct lua_State *L __attribute__((unused))) {}
 
 struct port port_null = {

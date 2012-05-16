@@ -30,15 +30,17 @@
  */
 #include <util.h>
 
-struct box_tuple;
+struct tuple;
 struct lua_State;
 
 struct port {
 	void (*add_u32)(u32 *u32);
 	void (*dup_u32)(u32 u32);
-	void (*add_tuple)(struct box_tuple *tuple);
+	void (*add_tuple)(struct tuple *tuple);
 	void (*add_lua_multret)(struct lua_State *L);
 };
+
+void port_ref(struct tuple *tuple);
 
 extern struct port port_null;
 extern struct port port_iproto;

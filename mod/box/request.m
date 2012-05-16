@@ -57,7 +57,7 @@ read_key(struct tbuf *data, void **key_ptr, u32 *key_part_count_ptr)
 }
 
 static void __attribute__((noinline))
-do_replace(struct box_txn *txn, size_t field_count, struct tbuf *data)
+do_replace(struct txn *txn, size_t field_count, struct tbuf *data)
 {
 	assert(data != NULL);
 	if (field_count == 0)
@@ -67,14 +67,10 @@ do_replace(struct box_txn *txn, size_t field_count, struct tbuf *data)
 		tnt_raise(IllegalParams, :"incorrect tuple length");
 
 	txn->new_tuple = tuple_alloc(data->size);
-	txn_ref_tuple(txn, txn->new_tuple);
 	txn->new_tuple->field_count = field_count;
 	memcpy(txn->new_tuple->data, data->data, data->size);
 
 	txn->old_tuple = [txn->index findByTuple: txn->new_tuple];
-
-	if (txn->old_tuple != NULL)
-		txn_ref_tuple(txn, txn->old_tuple);
 
 	if (txn->flags & BOX_ADD && txn->old_tuple != NULL)
 		tnt_raise(ClientError, :ER_TUPLE_FOUND);
@@ -641,7 +637,7 @@ update_field_skip_fields(struct update_field *field, i32 skip_count,
  * the operations.
  */
 static void
-init_update_operations(struct box_txn *txn, struct update_cmd *cmd)
+init_update_operations(struct txn *txn, struct update_cmd *cmd)
 {
 	/*
 	 * 1. Sort operations by field number and order within the
@@ -766,7 +762,7 @@ init_update_operations(struct box_txn *txn, struct update_cmd *cmd)
 }
 
 static void
-do_update_ops(struct box_txn *txn, struct update_cmd *cmd)
+do_update_ops(struct txn *txn, struct update_cmd *cmd)
 {
 	void *new_data = txn->new_tuple->data;
 	void *new_data_end = new_data + txn->new_tuple->bsize;
@@ -828,7 +824,7 @@ do_update_ops(struct box_txn *txn, struct update_cmd *cmd)
 }
 
 static void __attribute__((noinline))
-do_update(struct box_txn *txn, struct tbuf *data)
+do_update(struct txn *txn, struct tbuf *data)
 {
 	u32 tuples_affected = 1;
 
@@ -849,7 +845,6 @@ do_update(struct box_txn *txn, struct tbuf *data)
 	init_update_operations(txn, cmd);
 	/* allocate new tuple */
 	txn->new_tuple = tuple_alloc(cmd->new_tuple_len);
-	txn_ref_tuple(txn, txn->new_tuple);
 	do_update_ops(txn, cmd);
 	txn_lock_tuple(txn, txn->old_tuple);
 	space_validate(txn->space, txn->old_tuple, txn->new_tuple);
@@ -864,9 +859,9 @@ out:
 /** }}} */
 
 static void __attribute__((noinline))
-do_select(struct box_txn *txn, u32 limit, u32 offset, struct tbuf *data)
+do_select(struct txn *txn, u32 limit, u32 offset, struct tbuf *data)
 {
-	struct box_tuple *tuple;
+	struct tuple *tuple;
 	uint32_t *found;
 	u32 count = read_u32(data);
 	if (count == 0)
@@ -911,7 +906,7 @@ do_select(struct box_txn *txn, u32 limit, u32 offset, struct tbuf *data)
 }
 
 static void __attribute__((noinline))
-do_delete(struct box_txn *txn, struct tbuf *data)
+do_delete(struct txn *txn, struct tbuf *data)
 {
 	u32 tuples_affected = 0;
 
@@ -931,7 +926,6 @@ do_delete(struct box_txn *txn, struct tbuf *data)
 		 */
 		txn->flags |= BOX_NOT_STORE;
 	} else {
-		txn_ref_tuple(txn, txn->old_tuple);
 		txn_lock_tuple(txn, txn->old_tuple);
 
 		tuples_affected = 1;
@@ -944,7 +938,7 @@ do_delete(struct box_txn *txn, struct tbuf *data)
 }
 
 static void
-request_set_space(struct box_txn *txn, struct tbuf *data)
+request_set_space(struct txn *txn, struct tbuf *data)
 {
 	int space_no = read_u32(data);
 
@@ -961,7 +955,7 @@ request_set_space(struct box_txn *txn, struct tbuf *data)
 
 /** Remember op code/request in the txn. */
 void
-request_set_type(struct box_txn *req, u16 type, struct tbuf *data)
+request_set_type(struct txn *req, u16 type, struct tbuf *data)
 {
 	req->type = type;
 	req->req = (struct tbuf) {
@@ -972,7 +966,7 @@ request_set_type(struct box_txn *req, u16 type, struct tbuf *data)
 }
 
 void
-request_dispatch(struct box_txn *txn, struct tbuf *data)
+request_dispatch(struct txn *txn, struct tbuf *data)
 {
 	u32 field_count;
 
