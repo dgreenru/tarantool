@@ -97,6 +97,7 @@ extern const char *requests_strs[];
 
 ENUM(update_op_codes, UPDATE_OP_CODES);
 
+typedef void (*iproto_callback)(u32 op, struct tbuf *request_data);
 extern iproto_callback rw_callback;
 
 void request_set_type(struct txn *req, u16 type, struct tbuf *data);

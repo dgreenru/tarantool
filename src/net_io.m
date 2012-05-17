@@ -158,6 +158,12 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	return sock_write(fd, buf, count);
 }
 
+- (int) writev: (struct iovec *)iov :(int)iovcnt
+{
+	assert(fd >= 0);
+	return sock_writev(fd, iov, iovcnt);
+}
+
 - (void) onInput
 {
 	[self subclassResponsibility: _cmd];
@@ -180,7 +186,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 {
 	int fd = sock_create();
 	@try {
-		sock_nonblocking(fd);
+		sock_blocking_mode(fd, false);
 		/* These options are not critical, ignore the results. */
 		sock_enable_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
 		sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
@@ -286,6 +292,31 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 			/* Go past the data just written. */
 			buf += n;
 			count -= n;
+
+			/* Yield control to other fibers. */
+			fiber_yield();
+			fiber_testcancel();
+		}
+	}
+	@finally {
+		[self stopOutput];
+	}
+}
+
+- (void) coWriteV: (struct iovec *)iov :(int)iovcnt
+{
+	[self startOutput];
+	@try {
+		for (;;) {
+			/* Write as much data as possible. */
+			int n = [self writev: iov :iovcnt];
+			if (n == iovcnt) {
+				break;
+			}
+
+			/* Go past the data just written. */
+			iov += n;
+			iovcnt -= n;
 
 			/* Yield control to other fibers. */
 			fiber_yield();
@@ -582,77 +613,6 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count
 {
 	[super coReadAhead: buf :min_count :[service readahead]];
-}
-
-@end
-
-/* }}} */
-
-/* {{{ IProto Service. ********************************************/
-
-@implementation IProtoService
-
-- (Connection *) allocConnection
-{
-	return [IProtoConnection alloc];
-}
-
-- (void) onConnect: (Connection *) conn
-{
-	// TODO: use pool of worker fibers
-	
-	/* Create the worker fiber. */
-	struct fiber *worker = fiber_create([conn name], -1,
-					    (void (*)(void *)) iproto_interact,
-					    conn);
-	if (worker == NULL) {
-		say_error("can't create handler fiber, "
-			  "dropping client connection");
-		[conn close];
-		[conn free];
-		return;
-	}
-
-	/* Start the worker fiber. It becomes the conn object owner
-	   and will have to close and free it before termination. */
-	[((IProtoConnection *) conn) startWorker: worker];
-}
-
-- (void) input: (IProtoConnection *) conn
-{
-	// TODO: use non-blocking I/O
-	[conn coWork];
-}
-
-- (void) output: (IProtoConnection *) conn
-{
-	// TODO: use non-blocking I/O
-	[conn coWork];
-}
-
-- (void) process: (uint32_t) msg_code :(struct tbuf *) request
-{
-	(void) msg_code;
-	(void) request;
-	[self subclassResponsibility: _cmd];
-}
-
-@end
-
-/* }}} */
-
-/* {{{ IProto Connection. *****************************************/
-
-@implementation IProtoConnection
-
-- (void) onInput
-{
-	[((IProtoService *) service) input: self];
-}
-
-- (void) onOutput
-{
-	[((IProtoService *) service) output: self];
 }
 
 @end

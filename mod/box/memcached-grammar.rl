@@ -30,7 +30,7 @@
 }%%
 
 static int __attribute__((noinline))
-memcached_dispatch()
+memcached_dispatch(ServiceConnection *conn)
 {
 	int cs;
 	u8 *p, *pe;
@@ -44,7 +44,6 @@ memcached_dispatch()
 	bool noreply = false;
 	u8 *data = NULL;
 	bool done = false;
-	int r;
 	size_t saved_iov_cnt = fiber->iov_cnt;
 	uintptr_t flush_delay = 0;
 	size_t keys_count = 0;
@@ -258,10 +257,7 @@ memcached_dispatch()
 		action read_data {
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
-				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
-					say_debug("read returned %i, closing connection", r);
-					return 0;
-				}
+				[conn coReadAhead: fiber->rbuf :(bytes + 2 - (pe - p))];
 			}
 
 			p = fiber->rbuf->data + parsed;

@@ -23,9 +23,35 @@
  * SUCH DAMAGE.
  */
 
+#include <net_io.h>
 #include <stdint.h>
 
-#include <tbuf.h> /* for struct tbuf */
+#include <third_party/queue.h>
+
+@class IProtoConnection;
+
+STAILQ_HEAD(input_queue, input_buffer);
+struct input_buffer
+{
+	STAILQ_ENTRY(input_buffer) next;
+	u32 size;
+	u8 data[];
+};
+
+STAILQ_HEAD(output_queue, output_buffer);
+struct output_buffer
+{
+	STAILQ_ENTRY(output_buffer) next;
+};
+
+STAILQ_HEAD(request_queue, request);
+struct request
+{
+	STAILQ_ENTRY(request) next;
+	struct connection *connection;
+	struct fiber *worker;
+};
+
 
 /*
  * struct iproto_header and struct iproto_header_retcode
@@ -46,14 +72,36 @@ struct iproto_header_retcode {
 	uint32_t ret_code;
 } __attribute__((packed));
 
+
 static inline struct iproto_header *iproto(const struct tbuf *t)
 {
 	return (struct iproto_header *)t->data;
 }
 
+/**
+ * IProto Service.
+ */
+@interface IProtoService: Service {
+}
 
-typedef void (*iproto_callback) (uint32_t msg_code, struct tbuf *request);
+/* Extension point. */
+- (void) process: (uint32_t)msg_code :(struct tbuf *)request;
 
-void iproto_interact(iproto_callback *callback);
+@end
+
+
+/**
+ * IProto Connection.
+ */
+@interface IProtoConnection: ServiceConnection {
+	//struct request_queue queue;
+	//struct input_queue input_queue;
+	//struct output_queue output_queue;
+}
+
+- (void) interact;
+
+@end
+
 
 #endif

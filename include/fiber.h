@@ -169,9 +169,12 @@ inline static void iov_dup(const void *buf, size_t len)
 }
 
 /* Reset the fiber's iov vector. */
-ssize_t iov_flush(void);
-/* Write everything in the fiber's iov vector to fiber socket. */
 void iov_reset();
+/* Write everything in the fiber's iov vector to fiber socket. */
+ssize_t iov_flush(void);
+/* Write everything from the fiber's iov vector to the connection. */
+@class CoConnection;
+void iov_write(CoConnection *conn);
 
 const char *fiber_peer_name(struct fiber *fiber);
 int fiber_close(void);

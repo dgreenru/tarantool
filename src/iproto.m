@@ -37,57 +37,69 @@
 
 const uint32_t msg_ping = 0xff00;
 
-static void iproto_reply(iproto_callback callback, struct tbuf *request);
-
-inline static int
-iproto_flush(struct tbuf **in, ssize_t to_read)
+static void iproto_interact(IProtoConnection *conn)
 {
-	/*
-	 * Flush output and garbage collect before reading
-	 * next header.
-	 */
-	if (to_read > 0) {
-		if (iov_flush() < 0) {
-			say_warn("io_error: %s", strerror(errno));
-			return -1;
-		}
-		fiber_gc();
-		/* Must be reset after fiber_gc() */
-		*in = fiber->rbuf;
-	}
-	return 0;
+	[conn interact];
 }
 
-void
-iproto_interact(iproto_callback *callback)
+/* {{{ IProto Service. ********************************************/
+
+@implementation IProtoService
+
+- (Connection *) allocConnection
 {
-	struct tbuf *in = fiber->rbuf;
-	ssize_t to_read = sizeof(struct iproto_header);
-
-	for (;;) {
-		if (to_read > 0 && fiber_bread(in, to_read) <= 0)
-			break;
-
-		ssize_t request_len = sizeof(struct iproto_header) + iproto(in)->len;
-		to_read = request_len - in->size;
-
-		if (iproto_flush(&in, to_read) == -1)
-			break;
-		if (to_read > 0 && fiber_bread(in, to_read) <= 0)
-			break;
-
-		struct tbuf *request = tbuf_split(in, request_len);
-		iproto_reply(*callback, request);
-
-		to_read = sizeof(struct iproto_header) - in->size;
-		if (iproto_flush(&in, to_read) == -1)
-			break;
-	}
+	return [IProtoConnection alloc];
 }
 
-/** Stack a reply to a single request to the fiber's io vector. */
+- (void) onConnect: (Connection *)conn
+{
+	// TODO: use pool of worker fibers
+	
+	/* Create the worker fiber. */
+	struct fiber *worker = fiber_create([conn name], -1,
+					    (void (*)(void *)) iproto_interact,
+					    conn);
+	if (worker == NULL) {
+		say_error("can't create handler fiber, "
+			  "dropping client connection");
+		[conn close];
+		[conn free];
+		return;
+	}
 
-static void iproto_reply(iproto_callback callback, struct tbuf *request)
+	/* Start the worker fiber. It becomes the conn object owner
+	   and will have to close and free it before termination. */
+	[((IProtoConnection *) conn) startWorker: worker];
+}
+
+- (void) process: (uint32_t) msg_code :(struct tbuf *) request
+{
+	(void) msg_code;
+	(void) request;
+	[self subclassResponsibility: _cmd];
+}
+
+@end
+
+/* }}} */
+
+/* {{{ IProto Connection. *****************************************/
+
+@implementation IProtoConnection
+
+- (void) onInput
+{
+	// TODO: use non-blocking I/O with a queue
+	[self coWork];
+}
+
+- (void) onOutput
+{
+	// TODO: use non-blocking I/O with a queue
+	[self coWork];
+}
+
+- (void) reply: (struct tbuf *)request
 {
 	struct iproto_header_retcode *reply;
 
@@ -109,7 +121,8 @@ static void iproto_reply(iproto_callback callback, struct tbuf *request)
 	request->data = iproto(request)->data;
 
 	@try {
-		callback(reply->msg_code, request);
+		IProtoService *iproto = (IProtoService *) service;
+		[iproto process: reply->msg_code :request];
 		reply->ret_code = 0;
 	}
 	@catch (ClientError *e) {
@@ -121,3 +134,48 @@ static void iproto_reply(iproto_callback callback, struct tbuf *request)
 	for (; saved_iov_cnt < fiber->iov_cnt; saved_iov_cnt++)
 		reply->len += iovec(fiber->iov)[saved_iov_cnt].iov_len;
 }
+
+- (void) interact
+{
+	@try {
+		ssize_t to_read = sizeof(struct iproto_header);
+		for (;;) {
+			if (to_read > 0) {
+				[self coReadAhead: fiber->rbuf :to_read];
+			}
+
+			ssize_t request_len = (sizeof(struct iproto_header)
+					       + iproto(fiber->rbuf)->len);
+			to_read = request_len - fiber->rbuf->size;
+
+			if (to_read > 0) {
+				iov_write(self);
+				fiber_gc();
+				[self coReadAhead: fiber->rbuf :to_read];
+			}
+
+			struct tbuf *request = tbuf_split(fiber->rbuf,
+							  request_len);
+			[self reply: request];
+
+			to_read = sizeof(struct iproto_header) - fiber->rbuf->size;
+			if (to_read > 0) {
+				iov_write(self);
+				fiber_gc();
+			}
+		}
+	}
+	@catch (SocketEOF *) {
+	}
+	@catch (SocketError *e) {
+		[e log];
+	}
+	@finally {
+		[self close];
+		[self free];
+	}
+}
+
+@end
+
+/* }}} */

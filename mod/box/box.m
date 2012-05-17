@@ -28,6 +28,7 @@
 #include <cfg/warning.h>
 #include <errcode.h>
 #include <fiber.h>
+#include <net_io.h>
 #include <log_io.h>
 #include <pickle.h>
 #include <say.h>
@@ -62,11 +63,23 @@ struct box_snap_row {
 } __attribute__((packed));
 
 
+@interface BoxPrimaryService : IProtoService
+@end
+
+@interface BoxSecondaryService : IProtoService
+@end
+
+static BoxPrimaryService *primary_service;
+static BoxSecondaryService *secondary_service;
+static SingleWorkerService *memcached_service;
+
+
 static inline struct box_snap_row *
 box_snap_row(const struct tbuf *t)
 {
 	return (struct box_snap_row *)t->data;
 }
+
 static void
 box_process_rw(u32 op, struct tbuf *request_data)
 {
@@ -335,14 +348,6 @@ box_enter_master_or_replica_mode(struct tarantool_cfg *conf)
 	}
 }
 
-static void
-box_leave_local_standby_mode(void *data __attribute__((unused)))
-{
-	recovery_finalize(recovery_state);
-
-	box_enter_master_or_replica_mode(&cfg);
-}
-
 i32
 mod_check_config(struct tarantool_cfg *conf)
 {
@@ -433,6 +438,44 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 	return 0;
 }
 
+@implementation BoxPrimaryService
+
+- (id) init
+{
+	struct service_config config;
+	tarantool_config_service(&config, cfg.primary_port);
+	return [super init: "primary" :&config];
+}
+
+- (void) onBind
+{
+	recovery_finalize(recovery_state);
+	box_enter_master_or_replica_mode(&cfg);
+}
+
+- (void) process: (uint32_t) msg_code :(struct tbuf *) request
+{
+	rw_callback(msg_code, request);
+}
+
+@end
+
+@implementation BoxSecondaryService
+
+- (id) init
+{
+	struct service_config config;
+	tarantool_config_service(&config, cfg.secondary_port);
+	return [super init: "secondary" :&config];
+}
+
+- (void) process: (uint32_t) msg_code :(struct tbuf *) request
+{
+	box_process_ro(msg_code, request);
+}
+
+@end
+
 void
 mod_free(void)
 {
@@ -443,8 +486,6 @@ mod_free(void)
 void
 mod_init(void)
 {
-	static iproto_callback ro_callback = box_process_ro;
-
 	title("loading");
 	atexit(mod_free);
 
@@ -494,21 +535,25 @@ mod_init(void)
 	}
 
 	/* run primary server */
-	if (cfg.primary_port != 0)
-		fiber_server("primary", cfg.primary_port,
-			     (fiber_server_callback) iproto_interact,
-			     &rw_callback, box_leave_local_standby_mode);
+	if (cfg.primary_port != 0) {
+		primary_service = [BoxPrimaryService new];
+		[primary_service start];
+	}
 
 	/* run secondary server */
-	if (cfg.secondary_port != 0)
-		fiber_server("secondary", cfg.secondary_port,
-			     (fiber_server_callback) iproto_interact,
-			     &ro_callback, NULL);
+	if (cfg.secondary_port != 0) {
+		secondary_service = [BoxSecondaryService new];
+		[secondary_service start];
+	}
 
 	/* run memcached server */
-	if (cfg.memcached_port != 0)
-		fiber_server("memcached", cfg.memcached_port,
-			     memcached_handler, NULL, NULL);
+	if (cfg.memcached_port != 0) {
+		memcached_service =
+			[SingleWorkerService create: "memcached"
+						   :cfg.memcached_port
+						   :memcached_handler];
+		[memcached_service start];
+	}
 }
 
 int

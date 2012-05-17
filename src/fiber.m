@@ -52,7 +52,7 @@
 #include <util.h>
 #include <stat.h>
 #include <pickle.h>
-#include <sock.h>
+#include <net_io.h>
 
 @implementation FiberCancelException
 @end
@@ -694,6 +694,13 @@ iov_flush(void)
 	return result;
 }
 
+void
+iov_write(CoConnection *conn)
+{
+	struct iovec *iov = iovec(fiber->iov);
+	[conn coWriteV: iov :fiber->iov_cnt];
+	iov_reset();
+}
 
 int
 set_nonblock(int sock)

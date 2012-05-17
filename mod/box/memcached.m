@@ -36,6 +36,7 @@
 #include "pickle.h"
 #include "space.h"
 #include "port.h"
+#include <net_io.h>
 
 #define STAT(_)					\
         _(MEMC_GET, 1)				\
@@ -317,25 +318,20 @@ do {										\
 #include "memcached-grammar.m"
 
 void
-memcached_handler(void *_data __attribute__((unused)))
+memcached_loop(ServiceConnection *conn)
 {
-	stats.total_connections++;
-	stats.curr_connections++;
-	int r, p;
+	int p;
 	int batch_count;
 
 	for (;;) {
 		batch_count = 0;
-		if ((r = fiber_bread(fiber->rbuf, 1)) <= 0) {
-			say_debug("read returned %i, closing connection", r);
-			goto exit;
-		}
+		[conn coReadAhead: fiber->rbuf :1];
 
 	dispatch:
-		p = memcached_dispatch();
+		p = memcached_dispatch(conn);
 		if (p < 0) {
 			say_debug("negative dispatch, closing connection");
-			goto exit;
+			return;
 		}
 
 		if (p == 0 && batch_count == 0) /* we havn't successfully parsed any requests */
@@ -348,13 +344,8 @@ memcached_handler(void *_data __attribute__((unused)))
 				goto dispatch;
 		}
 
-		r = iov_flush();
-		if (r < 0) {
-			say_debug("flush_output failed, closing connection");
-			goto exit;
-		}
-
-		stats.bytes_written += r;
+		iov_write(conn);
+		// TODO: stats.bytes_written += r;
 		fiber_gc();
 
 		if (p == 1 && fiber->rbuf->size > 0) {
@@ -362,13 +353,30 @@ memcached_handler(void *_data __attribute__((unused)))
 			goto dispatch;
 		}
 	}
-exit:
-        iov_flush();
-	fiber_sleep(0.01);
-	say_debug("exit");
-	stats.curr_connections--; /* FIXME: nonlocal exit via exception will leak this counter */
 }
 
+void
+memcached_handler(ServiceConnection *conn)
+{
+	stats.total_connections++;
+	stats.curr_connections++;
+
+	@try {
+		memcached_loop(conn);
+	}
+	@catch (SocketEOF *) {
+	}
+	@finally {
+		iov_write(conn);
+		fiber_sleep(0.01);
+		say_debug("exit");
+
+		[conn close];
+		[conn free];
+
+		stats.curr_connections--;
+	}
+}
 
 int
 memcached_check_config(struct tarantool_cfg *conf)

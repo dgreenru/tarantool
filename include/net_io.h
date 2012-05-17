@@ -30,38 +30,16 @@
  */
 
 #include <fiber.h>
-#include <iproto.h>
 #include <sock.h>
 #include <util.h>
 #include <tarantool_ev.h>
-
-#include <third_party/queue.h>
 
 #import <objc/Object.h>
 
 #define SERVICE_NAME_MAXLEN 32
 
-STAILQ_HEAD(input_queue, input_buffer);
-struct input_buffer
-{
-	STAILQ_ENTRY(input_buffer) next;
-	u32 size;
-	u8 data[];
-};
 
-STAILQ_HEAD(output_queue, output_buffer);
-struct output_buffer
-{
-	STAILQ_ENTRY(output_buffer) next;
-};
-
-STAILQ_HEAD(request_queue, request);
-struct request
-{
-	STAILQ_ENTRY(request) next;
-	struct connection *connection;
-	struct fiber *worker;
-};
+@class ServiceConnection;
 
 
 @protocol TimerHandler
@@ -92,16 +70,13 @@ struct service_config
 };
 
 
-/* Forward declarations. */
-@class ServiceConnection;
-@class IProtoConnection;
-
-
 /**
  * Generic Network Connection.
  */
 @interface Connection: Object <InputHandler, OutputHandler> {
+@public
 	int fd;
+@protected
 	struct ev_io input;
 	struct ev_io output;
 }
@@ -121,6 +96,7 @@ struct service_config
 /* I/O */
 - (size_t) read: (void *)buf :(size_t)count;
 - (size_t) write: (void *)buf :(size_t)count;
+- (int) writev: (struct iovec *)iov :(int)iovcnt;
 
 @end
 
@@ -143,6 +119,7 @@ struct service_config
 - (void) coRead: (void *)buf :(size_t)count;
 - (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count;
 - (void) coWrite: (void *)buf :(size_t)count;
+- (void) coWriteV: (struct iovec *)iov :(int)iovcnt;
 
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count :(size_t)readahead;
@@ -208,33 +185,6 @@ struct service_config
 
 - (void) startWorker: (struct fiber *) worker_;
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
-
-@end
-
-
-/**
- * IProto Service.
- */
-@interface IProtoService: Service {
-}
-
-- (void) input: (IProtoConnection *) conn;
-- (void) output: (IProtoConnection *) conn;
-
-/* Extension point. */
-- (void) process: (uint32_t) msg_code :(struct tbuf *) request;
-
-@end
-
-
-/**
- * IProto Connection.
- */
-@interface IProtoConnection: ServiceConnection {
-	//struct request_queue queue;
-	//struct input_queue input_queue;
-	//struct output_queue output_queue;
-}
 
 @end
 

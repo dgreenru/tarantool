@@ -28,7 +28,9 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 struct tarantool_cfg;
+@class Connection;
 
 void
 memcached_init();
@@ -45,6 +47,6 @@ memcached_check_config(struct tarantool_cfg *conf);
 void memcached_start_expire();
 void memcached_stop_expire();
 
-void memcached_handler(void * /* data */);
+void memcached_handler(ServiceConnection *conn);
 
 #endif /* TARANTOOL_MEMCACHED_H_INCLUDED */
