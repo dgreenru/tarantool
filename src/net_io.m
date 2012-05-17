@@ -648,7 +648,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 - (void) onConnect: (ServiceConnection *) conn
 {
 	/* Create the worker fiber. */
-	struct fiber *worker = fiber_create([conn name], -1,
+	struct fiber *worker = fiber_create([conn name],
 					    (void (*)(void *)) cb, conn);
 	if (worker == NULL) {
 		say_error("can't create handler fiber, "

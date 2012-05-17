@@ -548,7 +548,7 @@ void memcached_start_expire()
 		return;
 
 	assert(memcached_expire == NULL);
-	memcached_expire = fiber_create("memcached_expire", -1,
+	memcached_expire = fiber_create("memcached_expire",
 					memcached_expire_loop, NULL);
 	if (memcached_expire == NULL)
 		say_error("can't start the expire fiber");

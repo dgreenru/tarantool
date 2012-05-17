@@ -56,7 +56,7 @@ static void iproto_interact(IProtoConnection *conn)
 	// TODO: use pool of worker fibers
 	
 	/* Create the worker fiber. */
-	struct fiber *worker = fiber_create([conn name], -1,
+	struct fiber *worker = fiber_create([conn name],
 					    (void (*)(void *)) iproto_interact,
 					    conn);
 	if (worker == NULL) {

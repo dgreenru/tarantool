@@ -556,7 +556,7 @@ lbox_fiber_create(struct lua_State *L)
 		luaL_error(L, "fiber.create(function): recursion limit"
 			   " reached");
 	}
-	struct fiber *f= fiber_create("lua", -1, box_lua_fiber_run, NULL);
+	struct fiber *f= fiber_create("lua", box_lua_fiber_run, NULL);
 
 	lua_pushlightuserdata(L, f); /* associate coro with fiber */
 	struct lua_State *child_L = lua_newthread(L);
@@ -1109,7 +1109,7 @@ void tarantool_lua_load_init_script(struct lua_State *L)
 	 * To work this problem around we must run init script in
 	 * a separate fiber.
 	 */
-	struct fiber *loader = fiber_create(TARANTOOL_LUA_INIT_SCRIPT, -1,
+	struct fiber *loader = fiber_create(TARANTOOL_LUA_INIT_SCRIPT,
 					    load_init_script, L);
 	fiber_call(loader);
 }
