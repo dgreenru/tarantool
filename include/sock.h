@@ -53,6 +53,7 @@ int sock_accept(int sockfd, struct sockaddr_in *addr, socklen_t *addrlen);
 
 size_t sock_read(int fd, void *buf, size_t count);
 size_t sock_write(int fd, void *buf, size_t count);
+int sock_writev(int fd, struct iovec *iov, int iovcnt);
 
 int sock_peer_name(int fd, struct sockaddr_in *addr);
 int sock_address_string(struct sockaddr_in *addr, char *str, size_t len);

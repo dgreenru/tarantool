@@ -242,14 +242,11 @@ sock_accept(int sockfd, struct sockaddr_in *addr, socklen_t *addrlen)
 size_t
 sock_read(int fd, void *buf, size_t count)
 {
-	size_t total = 0;
+	size_t orig_count = count;
 	while (count > 0) {
 		ssize_t n = read(fd, buf, count);
 		if (n == 0) {
-			if (count) {
-				@throw [SocketEOF new];
-			}
-			break;
+			@throw [SocketEOF new];
 		} else if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				break;
@@ -261,9 +258,8 @@ sock_read(int fd, void *buf, size_t count)
 
 		buf += n;
 		count -= n;
-		total += n;
 	}
-	return total;
+	return (orig_count - count);
 }
 
 /**
@@ -272,7 +268,7 @@ sock_read(int fd, void *buf, size_t count)
 size_t
 sock_write(int fd, void *buf, size_t count)
 {
-	size_t total = 0;
+	size_t orig_count = count;
 	while (count > 0) {
 		ssize_t n = write(fd, buf, count);
 		if (n < 0) {
@@ -286,9 +282,48 @@ sock_write(int fd, void *buf, size_t count)
 
 		buf += n;
 		count -= n;
-		total += n;
 	}
-	return total;
+	return (orig_count - count);
+}
+
+/**
+ * Write to a socket with iovec.
+ *
+ * NB: Despite similar signature the contract for this function
+ * substantially differs from the underlying writev system call.
+ * Instead of the number of written bytes it returns the number
+ * of iovecs that were completely written. For a partial write
+ * the individual iovec following those completely written will
+ * have the iov_len and iov_base fields updated to reflect how
+ * much data remains to be written. Also for iovecs completely
+ * written these fields may be modified too as a side affect of
+ * the function going through them. These modifications bear no
+ * meaning to the caller.
+ */
+int
+sock_writev(int fd, struct iovec *iov, int iovcnt)
+{
+	size_t orig_iovcnt = 0;
+	while (iovcnt > 0) {
+		ssize_t n = writev(fd, iov, iovcnt);
+		if (n < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			} else if (errno == EINTR) {
+				continue;
+			}
+			tnt_raise(SocketError, :"writev");
+		}
+
+		while (n >= iov->iov_len) {
+			n -= iov->iov_len;
+			iov++;
+			iovcnt--;
+		}
+		iov->iov_base += n;
+		iov->iov_len -= n;
+	}
+	return (orig_iovcnt - iovcnt);
 }
 
 /**
