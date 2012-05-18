@@ -315,13 +315,18 @@ sock_writev(int fd, struct iovec *iov, int iovcnt)
 			tnt_raise(SocketError, :"writev");
 		}
 
-		while (n >= iov->iov_len) {
+		while (n > iov->iov_len) {
 			n -= iov->iov_len;
 			iov++;
 			iovcnt--;
 		}
-		iov->iov_base += n;
-		iov->iov_len -= n;
+		if (n == iov->iov_len) {
+			iov++;
+			iovcnt--;
+		} else {
+			iov->iov_base += n;
+			iov->iov_len -= n;
+		}
 	}
 	return (orig_iovcnt - iovcnt);
 }
