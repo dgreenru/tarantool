@@ -524,9 +524,13 @@ iov_reset()
 void
 iov_write(CoConnection *conn)
 {
-	struct iovec *iov = iovec(fiber->iov);
-	[conn coWriteV: iov :fiber->iov_cnt];
-	iov_reset();
+	@try {
+		struct iovec *iov = iovec(fiber->iov);
+		[conn coWriteV: iov :fiber->iov_cnt];
+	}
+	@finally {
+		iov_reset();
+	}
 }
 
 int

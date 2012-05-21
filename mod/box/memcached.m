@@ -363,11 +363,14 @@ memcached_handler(ServiceConnection *conn)
 
 	@try {
 		memcached_loop(conn);
+		iov_write(conn);
 	}
 	@catch (SocketEOF *) {
 	}
+	@catch (SocketError *e) {
+		[e log];
+	}
 	@finally {
-		iov_write(conn);
 		fiber_sleep(0.01);
 		say_debug("exit");
 
