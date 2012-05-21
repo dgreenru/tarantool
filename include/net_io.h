@@ -138,6 +138,7 @@ struct service_config
 }
 
 - (id) init: (struct service_config *)config;
+- (void) close;
 - (void) start;
 - (void) stop;
 

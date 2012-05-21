@@ -33,7 +33,6 @@
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <sysexits.h>
 
 /* Surrogate peer names */
 #define DEFAULT_PEER "default"
@@ -356,6 +355,21 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 /* {{{ Connection Acceptor. ***************************************/
 
+/**
+ * Bind the server socket and start listening.
+ */
+static int
+bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
+{
+	if (sock_bind(listen_fd, addr) < 0) {
+		return -1;
+	}
+	if (sock_listen(listen_fd, backlog) < 0) {
+		return -1;
+	}
+	return 0;
+}
+
 @implementation Acceptor
 
 - (id) init: (struct service_config *)config
@@ -373,34 +387,57 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 - (bool) bind
 {
 	@try {
-		/* Bind the server socket and start listening. */
-		listen_fd = sock_create_server(&service_config.addr,
-					       service_config.listen_backlog);
+		/* Create a socket. */
+		listen_fd = sock_create();
 
+		/* Set appropriate options. */
+		sock_blocking_mode(listen_fd, false);
+		sock_enable_option(listen_fd, SOL_SOCKET, SO_REUSEADDR);
+		sock_enable_option(listen_fd, SOL_SOCKET, SO_KEEPALIVE);
+		sock_reset_linger(listen_fd);
+
+		/* Try to bind the socket. */
+		if (bind_and_listen(listen_fd,
+				    &service_config.addr,
+				    service_config.listen_backlog) < 0) {
+			if (service_config.bind_retry) {
+				[self close];
+				return false;
+			}
+			tnt_raise(SocketError, :"bind");
+		}
 		say_info("bound to port %i", [self port]);
-
-		/* Register the socket with event loop. */
-		ev_io_set(&accept_event, listen_fd, EV_READ);
-		ev_io_start(&accept_event);
-
-		/* Notify a derived object on the bind event. */
-		[self onBind];
-
-		return true;
 	}
 	@catch (SocketError *e) {
-		if (service_config.bind_retry || e->error == EADDRINUSE) {
-			return false;
-		}
+		/* Failed to bind the socket. */
+		[self close];
 		[e log];
-	}
-	@catch (id e) {
-		(void) e;
+		say_error("Failed to init server socket on port %i", [self port]);
+		@throw;
 	}
 
-	/* Failed to bind the socket. */
-	say_error("init server socket on port %i fail", [self port]);
-	exit(EX_OSERR);
+	/* Notify a derived object on the bind event. */
+	@try {
+		[self onBind];
+	}
+	@catch (id) {
+		[self close];
+		@throw;
+	}
+
+	/* Register the socket with the event loop. */
+	ev_io_set(&accept_event, listen_fd, EV_READ);
+	ev_io_start(&accept_event);
+
+	return true;
+}
+
+- (void) close
+{
+	if (listen_fd > 0) {
+		close(listen_fd);
+		listen_fd = -1;
+	}
 }
 
 - (void) start
@@ -425,8 +462,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 		ev_timer_stop(&timer_event);
 	} else {
 		ev_io_stop(&accept_event);
-		close(listen_fd);
-		listen_fd = -1;
+		[self close];
 	}
 }
 

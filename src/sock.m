@@ -127,7 +127,7 @@ sock_enable_option_nc(int fd, int level, int option)
 /**
  * Reset linger option for a socket.
  */
-static inline void
+void
 sock_reset_linger(int fd)
 {
 	struct linger ling = { 0, 0 };
@@ -176,43 +176,33 @@ sock_connect_inprogress(int fd)
 }
 
 /**
- * Set options appropriate for a server socket.
+ * Bind a socket to the given address.
  */
-static void
-sock_set_server_options(int fd)
+int
+sock_bind(int fd, struct sockaddr_in *addr)
 {
-	sock_nonblocking(fd);
-	sock_enable_option(fd, SOL_SOCKET, SO_REUSEADDR);
-	sock_enable_option(fd, SOL_SOCKET, SO_KEEPALIVE);
-	sock_reset_linger(fd);
+	if (bind(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+		if (errno == EADDRINUSE) {
+			return -1;
+		}
+		tnt_raise(SocketError, :"bind");
+	}
+	return 0;
 }
 
 /**
- * Create a server socket.
+ * Mark a socket as accepting connections.
  */
 int
-sock_create_server(struct sockaddr_in *addr, int backlog)
+sock_listen(int fd, int backlog)
 {
-	/* Create a socket. */
-	int fd = sock_create();
-	@try {
-		/* Set appropriate options. */
-		sock_set_server_options(fd);
-
-		/* Go listening on the given address */
-		if (bind(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
-			tnt_raise(SocketError, :"bind");
+	if (listen(fd, backlog) < 0) {
+		if (errno == EADDRINUSE) {
+			return -1;
 		}
-		if (listen(fd, backlog) < 0) {
-			tnt_raise(SocketError, :"listen");
-		}
-
-		return fd;
+		tnt_raise(SocketError, :"listen");
 	}
-	@catch (id e) {
-		close(fd);
-		@throw;
-	}
+	return 0;
 }
 
 /**

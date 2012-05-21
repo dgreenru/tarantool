@@ -41,15 +41,16 @@
 int sock_create(void);
 
 void sock_blocking_mode(int fd, bool blocking);
-
 void sock_enable_option(int fd, int level, int option);
 void sock_enable_option_nc(int fd, int level, int option);
+void sock_reset_linger(int fd);
 
 int sock_connect(int fd, struct sockaddr_in *addr);
 int sock_connect_inprogress(int fd);
 
-int sock_create_server(struct sockaddr_in *addr, int backlog);
+int sock_bind(int fd, struct sockaddr_in *addr);
 int sock_accept(int sockfd, struct sockaddr_in *addr, socklen_t *addrlen);
+int sock_listen(int fd, int backlog);
 
 size_t sock_read(int fd, void *buf, size_t count);
 size_t sock_write(int fd, void *buf, size_t count);
@@ -57,8 +58,5 @@ int sock_writev(int fd, struct iovec *iov, int iovcnt);
 
 int sock_peer_name(int fd, struct sockaddr_in *addr);
 int sock_address_string(struct sockaddr_in *addr, char *str, size_t len);
-
-#define sock_blocking(fd) sock_blocking_mode(fd, true)
-#define sock_nonblocking(fd) sock_blocking_mode(fd, false)
 
 #endif /* TARANTOOL_SOCK_H_INCLUDED */
