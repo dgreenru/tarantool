@@ -115,7 +115,9 @@ static void iproto_interact(IProtoConnection *conn)
 
 	reply->len = sizeof(uint32_t); /* ret_code */
 	iov_add(reply, sizeof(struct iproto_header_retcode));
+
 	size_t saved_iov_cnt = fiber->iov_cnt;
+
 	/* make request point to iproto data */
 	request->size = iproto(request)->len;
 	request->data = iproto(request)->data;
@@ -138,16 +140,11 @@ static void iproto_interact(IProtoConnection *conn)
 - (void) interact
 {
 	@try {
-		ssize_t to_read = sizeof(struct iproto_header);
+		[self coReadAhead: fiber->rbuf :sizeof(struct iproto_header)];
 		for (;;) {
-			if (to_read > 0) {
-				[self coReadAhead: fiber->rbuf :to_read];
-			}
-
 			ssize_t request_len = (sizeof(struct iproto_header)
 					       + iproto(fiber->rbuf)->len);
-			to_read = request_len - fiber->rbuf->size;
-
+			ssize_t to_read = request_len - fiber->rbuf->size;
 			if (to_read > 0) {
 				iov_write(self);
 				fiber_gc();
@@ -162,6 +159,7 @@ static void iproto_interact(IProtoConnection *conn)
 			if (to_read > 0) {
 				iov_write(self);
 				fiber_gc();
+				[self coReadAhead: fiber->rbuf :to_read];
 			}
 		}
 	}
