@@ -303,7 +303,7 @@ sock_write(int fd, void *buf, size_t count)
 int
 sock_writev(int fd, struct iovec *iov, int iovcnt)
 {
-	size_t orig_iovcnt = 0;
+	size_t orig_iovcnt = iovcnt;
 	while (iovcnt > 0) {
 		ssize_t n = writev(fd, iov, iovcnt);
 		if (n < 0) {
