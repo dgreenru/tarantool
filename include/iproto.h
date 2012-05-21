@@ -103,5 +103,4 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 
 @end
 
-
 #endif

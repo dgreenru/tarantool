@@ -83,11 +83,6 @@ struct fiber {
 	char name[FIBER_NAME_MAXLEN];
 	void (*f) (void *);
 	void *f_data;
-	/* Store execution context in a fiber. */
-	union {
-		struct txn *txn;
-	} mod_data;
-
 	u64 cookie;
 	u32 flags;
 

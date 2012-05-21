@@ -28,6 +28,7 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+#include <objc/Object.h>
 #include <util.h>
 #include <tbuf.h>
 #include <iproto.h>
@@ -37,19 +38,15 @@ enum {
 	/** A limit on how many operations a single UPDATE can have. */
 	BOX_UPDATE_OP_CNT_MAX = 128,
 };
-@class Index;
-struct tarantool_cfg;
-struct tuple;
+@class Port;
 struct txn;
 
 #define BOX_RETURN_TUPLE		0x01
 #define BOX_ADD				0x02
 #define BOX_REPLACE			0x04
-#define BOX_NOT_STORE			0x10
 #define BOX_ALLOWED_REQUEST_FLAGS	(BOX_RETURN_TUPLE | \
 					 BOX_ADD | \
-					 BOX_REPLACE | \
-					 BOX_NOT_STORE)
+					 BOX_REPLACE)
 
 /**
     deprecated request ids:
@@ -97,16 +94,20 @@ extern const char *requests_strs[];
 
 ENUM(update_op_codes, UPDATE_OP_CODES);
 
-typedef void (*iproto_callback)(u32 op, struct tbuf *request_data);
-extern iproto_callback rw_callback;
-
-void request_set_type(struct txn *req, u16 type, struct tbuf *data);
-void request_dispatch(struct txn *txn, struct tbuf *data);
-
 static inline bool
 request_is_select(u32 type)
 {
 	return type == SELECT || type == CALL;
 }
+
+@interface Request: Object {
+	u32 type;
+	struct tbuf *data;
+}
++ (Request *) alloc;
++ (Request *) build: (u32) type_arg;
+- (id) init: (struct tbuf *) data_arg;
+- (void) execute: (struct txn *) txn :(Port *) port;
+@end
 
 #endif /* TARANTOOL_BOX_REQUEST_H_INCLUDED */

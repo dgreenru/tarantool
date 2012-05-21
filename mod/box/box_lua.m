@@ -29,7 +29,10 @@
  * SUCH DAMAGE.
  */
 #include "box_lua.h"
+#include <objc/runtime.h>
 #include <tarantool_lua.h>
+#include <fiber.h>
+#include "box.h"
 #include "request.h"
 #include "txn.h"
 
@@ -41,6 +44,7 @@
 #include "tuple.h"
 #include "space.h"
 #include "port.h"
+
 
 /* contents of box.lua */
 extern const char box_lua[];
@@ -324,12 +328,12 @@ lbox_index_new(struct lua_State *L)
 	int n = luaL_checkint(L, 1); /* get space id */
 	int idx = luaL_checkint(L, 2); /* get index id in */
 	/* locate the appropriate index */
-	if (n >= BOX_SPACE_MAX || !space[n].enabled ||
-	    idx >= BOX_INDEX_MAX || space[n].index[idx] == nil)
+	if (n >= BOX_SPACE_MAX || !spaces[n].enabled ||
+	    idx >= BOX_INDEX_MAX || spaces[n].index[idx] == nil)
 		tnt_raise(LoggedError, :ER_NO_SUCH_INDEX, idx, n);
 	/* create a userdata object */
 	void **ptr = lua_newuserdata(L, sizeof(void *));
-	*ptr = space[n].index[idx];
+	*ptr = spaces[n].index[idx];
 	/* set userdata object metatable to indexlib */
 	luaL_getmetatable(L, indexlib_name);
 	lua_setmetatable(L, -2);
@@ -549,61 +553,43 @@ static const struct luaL_reg lbox_iterator_meta[] = {
  * and push into Lua stack.
  */
 
-static void
-port_lua_dup_u32(u32 u32 __attribute__((unused)))
+/*
+ * For addU32/dupU32 do nothing -- the only u32 Box can give
+ * us is tuple count, and we don't need it, since we intercept
+ * everything into Lua stack first.
+ * @sa iov_add_multret
+ */
+@interface PortLua: PortNull {
+	struct lua_State *L;
+}
++ (PortLua *) alloc;
+- (id) init: (struct lua_State *) L_arg;
+@end
+
+@implementation PortLua
++ (PortLua *) alloc
 {
-	/*
-	 * Do nothing -- the only u32 Box can give us is
-	 * tuple count, and we don't need it, since we intercept
-	 * everything into Lua stack first.
-	 * @sa iov_add_multret
-	 */
+	size_t sz = class_getInstanceSize(self);
+	id new = palloc(fiber->gc_pool, sz);
+	object_setClass(new, self);
+	return new;
 }
 
-static void
-port_lua_add_u32(u32 *p_u32 __attribute__((unused)))
+- (id) init: (struct lua_State *) L_arg
 {
-	/* See the comment in port_lua_dup_u32. */
+	if ((self = [super init]))
+		L = L_arg;
+	return self;
 }
 
-static void
-port_lua_add_tuple(struct tuple *tuple)
+- (void) addTuple: (struct tuple *) tuple
 {
-	struct lua_State *L = in_txn()->L;
 	lbox_pushtuple(L, tuple);
 }
 
-static void
-port_lua_add_lua_multret(struct lua_State *L)
-{
-	/*
-	 * We cannot issue a CALL request from within a CALL
-	 * request. Instead users should call Lua procedures
-	 * directly.
-	 */
-	assert(false);
-	(void) L;
-}
-
-static struct port port_lua = {
-	port_lua_add_u32,
-	port_lua_dup_u32,
-	port_lua_add_tuple,
-	port_lua_add_lua_multret
-};
+@end
 
 /* }}} */
-
-static inline struct txn *
-txn_enter_lua(lua_State *L)
-{
-	struct txn *old_txn = in_txn();
-	fiber->mod_data.txn = NULL;
-	struct txn *txn = fiber->mod_data.txn = txn_begin();
-	txn->port = &port_lua;
-	txn->L = L;
-	return old_txn;
-}
 
 /**
  * The main extension provided to Lua by Tarantool/Box --
@@ -636,12 +622,12 @@ static int lbox_process(lua_State *L)
 	}
 	int top = lua_gettop(L); /* to know how much is added by rw_callback */
 
+	struct txn *txn = txn_begin();
+	Port *port_lua = [[PortLua alloc] init: L];
 	size_t allocated_size = palloc_allocated(fiber->gc_pool);
-	struct txn *old_txn = txn_enter_lua(L);
 	@try {
-		rw_callback(op, &req);
+		box_process(txn, port_lua, op, &req);
 	} @finally {
-		fiber->mod_data.txn = old_txn;
 		/*
 		 * This only works as long as port_lua doesn't
 		 * use fiber->cleanup and fiber->gc_pool.
@@ -696,15 +682,18 @@ box_lua_panic(struct lua_State *L)
 	return 0;
 }
 
+@implementation Call
 /**
  * Invoke a Lua stored procedure from the binary protocol
  * (implementation of 'CALL' command code).
  */
-void do_call(struct txn *txn, struct tbuf *data)
+- (void) execute: (struct txn *) txn : (Port *)port
 {
+	(void) txn;
 	lua_State *L = lua_newthread(root_L);
 	int coro_ref = luaL_ref(root_L, LUA_REGISTRYINDEX);
-
+	/* Request flags: not used. */
+	(void) (read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS);
 	@try {
 		u32 field_len = read_varint32(data);
 		void *field = read_str(data, field_len); /* proc name */
@@ -719,7 +708,7 @@ void do_call(struct txn *txn, struct tbuf *data)
 		}
 		lua_call(L, nargs, LUA_MULTRET);
 		/* Send results of the called procedure to the client. */
-		txn->port->add_lua_multret(L);
+		[port addLuaMultret: L];
 	} @finally {
 		/*
 		 * Allow the used coro to be garbage collected.
@@ -728,6 +717,7 @@ void do_call(struct txn *txn, struct tbuf *data)
 		luaL_unref(root_L, LUA_REGISTRYINDEX, coro_ref);
 	}
 }
+@end
 
 struct lua_State *
 mod_lua_init(struct lua_State *L)

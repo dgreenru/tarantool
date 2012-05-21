@@ -23,6 +23,7 @@
  * SUCH DAMAGE.
  */
 
+#include <config.h>
 #include <sys/types.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -31,31 +32,60 @@
 	#error "Only x86 and x86_64 architectures supported"
 #endif
 
-/* GCC intrinsic headers */
+#ifdef HAVE_CPUID_H
 #include <cpuid.h>
-#include <smmintrin.h>
-
+#else
+#include <third_party/compat/sys/cpuid.h>
+#endif
 #include "cpu_feature.h"
+
+#define SCALE_F		sizeof(unsigned long)
+
+#if defined (__x86_64__)
+	#define REX_PRE "0x48, "
+#elif defined (__i386__)
+	#define REX_PRE
+#else
+	#error "Only x86 and x86_64 architectures supported"
+#endif
+
+
+static u_int32_t
+crc32c_hw_byte(u_int32_t crc, unsigned char const *data, unsigned int length)
+{
+	while (length--) {
+		__asm__ __volatile__(
+			".byte 0xf2, 0xf, 0x38, 0xf0, 0xf1"
+			:"=S"(crc)
+			:"0"(crc), "c"(*data)
+		);
+		data++;
+	}
+
+	return crc;
+}
 
 
 u_int32_t
 crc32c_hw(u_int32_t crc, const unsigned char *buf, unsigned int len)
 {
-#define SCALE_F	sizeof(unsigned long)
-	size_t nwords = len / SCALE_F, nbytes = len % SCALE_F;
-	unsigned long *pword;
-	unsigned char *pbyte;
+	unsigned int iquotient = len / SCALE_F;
+	unsigned int iremainder = len % SCALE_F;
+	unsigned long *ptmp = (unsigned long *)buf;
 
-	for (pword = (unsigned long *)buf; nwords--; ++pword)
-#if defined (__x86_64__)
-		crc = (u_int32_t)_mm_crc32_u64((u_int64_t)crc, *pword);
-#elif defined (__i386__)
-		crc = _mm_crc32_u32(crc, *pword);
-#endif
+	while (iquotient--) {
+		__asm__ __volatile__(
+			".byte 0xf2, " REX_PRE "0xf, 0x38, 0xf1, 0xf1;"
+			:"=S"(crc)
+			:"0"(crc), "c"(*ptmp)
+		);
+		ptmp++;
+	}
 
-	if (nbytes)
-		for (pbyte = (unsigned char*)pword; nbytes--; ++pbyte)
-			crc = _mm_crc32_u8(crc, *pbyte);
+	if (iremainder) {
+		crc = crc32c_hw_byte(crc, (unsigned char const*)ptmp,
+				 			iremainder);
+	}
 
 	return crc;
 }
@@ -66,8 +96,8 @@ sse42_enabled_cpu()
 {
 	unsigned int ax, bx, cx, dx;
 
-	if (__get_cpuid(1 /* level */, &ax, &bx, &cx, &dx) == 0)
-		return 0; /* not supported */
+	if (__get_cpuid(1, &ax, &bx, &cx, &dx) == 0)
+		return 0;
 
 	return (cx & (1 << 20)) != 0;
 }

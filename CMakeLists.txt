@@ -45,10 +45,10 @@ endif()
 
 execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion
                 OUTPUT_VARIABLE GCC_VERSION)
-if (GCC_VERSION VERSION_GREATER 4.4 OR GCC_VERSION VERSION_EQUAL 4.4)
-        message(STATUS "GCC Version >= 4.4")
+if (GCC_VERSION VERSION_GREATER 4.1 OR GCC_VERSION VERSION_EQUAL 4.1)
+        message(STATUS "GCC Version >= 4.1")
 else()
-    message (FATAL_ERROR "GCC version should be >= 4.4")
+    message (FATAL_ERROR "GCC version should be >= 4.1")
 endif()
 
 #
@@ -83,6 +83,8 @@ endif()
 check_symbol_exists(MAP_ANON sys/mman.h HAVE_MAP_ANON)
 check_symbol_exists(MAP_ANONYMOUS sys/mman.h HAVE_MAP_ANONYMOUS)
 check_include_file(sys/time.h HAVE_SYS_TIME_H)
+check_include_file(unwind.h HAVE_UNWIND_H)
+check_include_file(cpuid.h HAVE_CPUID_H)
 
 check_symbol_exists(O_DSYNC fcntl.h HAVE_O_DSYNC)
 check_function_exists(fdatasync HAVE_FDATASYNC)
