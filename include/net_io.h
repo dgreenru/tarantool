@@ -90,9 +90,6 @@ struct service_config
 - (void) startOutput;
 - (void) stopOutput;
 
-/* Enable/Disable Blocking mode */
-- (void) setBlockingMode: (bool)blocking;
-
 /* I/O */
 - (size_t) read: (void *)buf :(size_t)count;
 - (size_t) write: (void *)buf :(size_t)count;

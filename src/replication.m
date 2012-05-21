@@ -205,7 +205,7 @@ replication_relay_send_row(struct recovery_state *r __attribute__((unused)), str
 		 inet_ntoa(addr->sin_addr),
 		 ntohs(addr->sin_port));
 
-	sock_enable_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
+	sock_set_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
 	ev_io_stop(&accept_event);
 	ev_io_start(&send_event);
 
@@ -559,7 +559,8 @@ replication_relay_loop(int client_sock)
 
 	/* set process title and fiber name */
 	struct sockaddr_in peer;
-	if (sock_peer_name(client_sock, &peer) == 0) {
+	socklen_t addrlen = sizeof(peer);
+	if (sock_peer_name(client_sock, &peer, &addrlen) == 0) {
 		char pname[FIBER_NAME_MAXLEN];
 		char fname[FIBER_NAME_MAXLEN];
 		sock_address_string(&peer, pname, sizeof(pname));

@@ -80,7 +80,7 @@ sock_create(void)
  * Set blocking mode for a socket.
  */
 void
-sock_blocking_mode(int fd, bool blocking)
+sock_set_blocking(int fd, bool blocking)
 {
 	int flags = fcntl(fd, F_GETFL, 0);
 	if (flags < 0) {
@@ -102,7 +102,7 @@ sock_blocking_mode(int fd, bool blocking)
  * Set an option for a socket.
  */
 void
-sock_enable_option(int fd, int level, int option)
+sock_set_option(int fd, int level, int option)
 {
 	int on = 1;
 	if (setsockopt(fd, level, option, &on, sizeof(on)) < 0) {
@@ -115,7 +115,7 @@ sock_enable_option(int fd, int level, int option)
  * Set a non-critical option for a socket.
  */
 void
-sock_enable_option_nc(int fd, int level, int option)
+sock_set_option_nc(int fd, int level, int option)
 {
 	int on = 1;
 	if (setsockopt(fd, level, option, &on, sizeof(on)) < 0) {
@@ -140,10 +140,10 @@ sock_reset_linger(int fd)
  * Connect a client socket to a server.
  */
 int
-sock_connect(int fd, struct sockaddr_in *addr)
+sock_connect(int fd, struct sockaddr_in *addr, socklen_t addrlen)
 {
 	/* Establish the connection. */
-	if (connect(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+	if (connect(fd, (struct sockaddr *) addr, addrlen) < 0) {
 		/* Something went wrong... */
 		if (errno == EINPROGRESS) {
 			/* Connection has not concluded yet. */
@@ -179,9 +179,9 @@ sock_connect_inprogress(int fd)
  * Bind a socket to the given address.
  */
 int
-sock_bind(int fd, struct sockaddr_in *addr)
+sock_bind(int fd, struct sockaddr_in *addr, socklen_t addrlen)
 {
-	if (bind(fd, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+	if (bind(fd, (struct sockaddr *) addr, addrlen) < 0) {
 		if (errno == EADDRINUSE) {
 			return -1;
 		}
@@ -219,10 +219,6 @@ sock_accept(int sockfd, struct sockaddr_in *addr, socklen_t *addrlen)
 		}
 		tnt_raise(SocketError, :"accept");
 	}
-
-	/* This option is not critical, ignore the result. */
-	sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
-
 	return fd;
 }
 
@@ -325,10 +321,9 @@ sock_writev(int fd, struct iovec *iov, int iovcnt)
  * Get socket peer name.
  */
 int
-sock_peer_name(int fd, struct sockaddr_in *addr)
+sock_peer_name(int fd, struct sockaddr_in *addr, socklen_t *addrlen)
 {
-	socklen_t addrlen = sizeof(*addr);
-	if (getpeername(fd, (struct sockaddr *)addr, &addrlen) < 0)
+	if (getpeername(fd, (struct sockaddr *)addr, addrlen) < 0)
 		return -1;
 	if (addr->sin_addr.s_addr == 0)
 		return -1;

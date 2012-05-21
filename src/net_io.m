@@ -139,12 +139,6 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	ev_io_stop(&output);
 }
 
-- (void) setBlockingMode: (bool)blocking
-{
-	assert(fd >= 0);
-	sock_blocking_mode(fd, blocking);
-}
-
 - (size_t) read: (void *)buf :(size_t)count
 {
 	assert(fd >= 0);
@@ -185,12 +179,12 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 {
 	int fd = sock_create();
 	@try {
-		sock_blocking_mode(fd, false);
+		sock_set_blocking(fd, false);
 		/* These options are not critical, ignore the results. */
-		sock_enable_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
-		sock_enable_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
+		sock_set_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
+		sock_set_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
 
-		if (sock_connect(fd, addr) < 0) {
+		if (sock_connect(fd, addr, sizeof(*addr)) < 0) {
 			assert(errno == EINPROGRESS);
 			fiber_io_wait(fd, EV_WRITE);
 			sock_connect_inprogress(fd);
@@ -361,7 +355,7 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 static int
 bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 {
-	if (sock_bind(listen_fd, addr) < 0) {
+	if (sock_bind(listen_fd, addr, sizeof(*addr)) < 0) {
 		return -1;
 	}
 	if (sock_listen(listen_fd, backlog) < 0) {
@@ -391,9 +385,9 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 		listen_fd = sock_create();
 
 		/* Set appropriate options. */
-		sock_blocking_mode(listen_fd, false);
-		sock_enable_option(listen_fd, SOL_SOCKET, SO_REUSEADDR);
-		sock_enable_option(listen_fd, SOL_SOCKET, SO_KEEPALIVE);
+		sock_set_blocking(listen_fd, false);
+		sock_set_option(listen_fd, SOL_SOCKET, SO_REUSEADDR);
+		sock_set_option(listen_fd, SOL_SOCKET, SO_KEEPALIVE);
 		sock_reset_linger(listen_fd);
 
 		/* Try to bind the socket. */
@@ -404,7 +398,7 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 				[self close];
 				return false;
 			}
-			tnt_raise(SocketError, :"bind");
+			tnt_raise(SocketError, :"bind/listen");
 		}
 		say_info("bound to port %i", [self port]);
 	}
@@ -412,7 +406,7 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 		/* Failed to bind the socket. */
 		[self close];
 		[e log];
-		say_error("Failed to init server socket on port %i", [self port]);
+		say_error("Failed to init a server socket on port %i", [self port]);
 		@throw;
 	}
 
@@ -484,20 +478,25 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 {
 	assert(listen_fd >= 0);
 
-	int fd = -1;
+	int fd;
+	struct sockaddr_in addr;
+	socklen_t addrlen = sizeof(addr);
 	@try {
-		struct sockaddr_in addr;
-		socklen_t addrlen = sizeof(addr);
 		fd = sock_accept(listen_fd, &addr, &addrlen);
-		if (fd >= 0) {
-			[self onAccept: fd :&addr];
+		if (fd < 0) {
+			return;
 		}
 	}
 	@catch (SocketError *e) {
-		if (fd >= 0) {
-			close(fd);
-		}
 		[e log];
+	}
+
+	/* Notify a derived object on the accept event. */
+	@try {
+		[self onAccept: fd :&addr];
+	}
+	@catch (id) {
+		close(fd);
 	}
 }
 
@@ -547,9 +546,13 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 - (void) onAccept: (int)fd :(struct sockaddr_in *)addr
 {
 	(void)addr;
+	/* Set socket options. */
+	sock_set_blocking(fd, false);
+	sock_set_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
+	/* Create a connection object. */
 	ServiceConnection *conn = [self allocConnection];
 	[conn init: self :fd];
-	[conn setBlockingMode: false];
+	/* Delegate the connection use to a subclass. */
 	[self onConnect: conn];
 }
 
@@ -614,7 +617,8 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	if (strcmp(peer, DEFAULT_PEER) == 0) {
 		/* Get the peer address. */
 		struct sockaddr_in addr;
-		if (sock_peer_name(fd, &addr) < 0) {
+		socklen_t addrlen = sizeof(addr);
+		if (sock_peer_name(fd, &addr, &addrlen) < 0) {
 			/* Failed to get it, use a dummy name. */
 			assert(strlen(UNKNOWN_PEER) < sizeof(peer));
 			strcpy(peer, UNKNOWN_PEER);
