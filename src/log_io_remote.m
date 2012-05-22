@@ -48,7 +48,6 @@ static CoConnection *conn = nil;
 static void
 close_connection()
 {
-	[conn detachWorker];
 	[conn close];
 	[conn free];
 	conn = nil;

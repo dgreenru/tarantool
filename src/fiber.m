@@ -471,6 +471,7 @@ fiber_create(const char *name, void (*f) (void *), void *f_data)
 	while (++last_used_fid <= 100) ;	/* fids from 0 to 100 are reserved */
 	fiber->fid = last_used_fid;
 	fiber->flags = 0;
+	fiber->peer = nil;
 	fiber->waiter = NULL;
 	fiber_set_name(fiber, name);
 	palloc_set_name(fiber->gc_pool, fiber->name);
@@ -509,9 +510,13 @@ fiber_destroy_all()
 const char *
 fiber_peer_name(struct fiber *fiber)
 {
-	// TODO
-	(void) fiber;
-	return NULL;
+	return fiber->peer == nil ? NULL : [fiber->peer peer];
+}
+
+u64
+fiber_peer_cookie(struct fiber *fiber)
+{
+	return fiber->peer == nil ? 0 : [fiber->peer cookie];
 }
 
 void

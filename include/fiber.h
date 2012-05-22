@@ -58,6 +58,11 @@
 @interface FiberCancelException: tnt_Exception
 @end
 
+@protocol FiberPeer
+- (const char *) peer;
+- (u64) cookie;
+@end
+
 struct fiber {
 	ev_async async;
 #ifdef ENABLE_BACKTRACE
@@ -83,8 +88,9 @@ struct fiber {
 	char name[FIBER_NAME_MAXLEN];
 	void (*f) (void *);
 	void *f_data;
-	u64 cookie;
 	u32 flags;
+
+	id<FiberPeer> peer;
 
 	struct fiber *waiter;
 };
@@ -153,6 +159,8 @@ void iov_reset();
 void iov_write(CoConnection *conn);
 
 const char *fiber_peer_name(struct fiber *fiber);
+u64 fiber_peer_cookie(struct fiber *fiber);
+
 void fiber_cleanup(void);
 void fiber_gc(void);
 bool fiber_checkstack();

@@ -129,12 +129,11 @@ txn_commit(struct txn *txn)
 	if (txn->op == 0) /* Nothing to do. */
 		return;
 	if (! (txn->txn_flags & BOX_NOT_STORE)) {
-		fiber_peer_name(fiber); /* fill the cookie */
-
+		u64 cookie = fiber_peer_cookie(fiber);
 		i64 lsn = next_lsn(recovery_state, 0);
 		int res = wal_write(recovery_state, wal_tag,
 				    txn->op,
-				    fiber->cookie, lsn, &txn->req);
+				    cookie, lsn, &txn->req);
 		confirm_lsn(recovery_state, lsn);
 		if (res)
 			tnt_raise(LoggedError, :ER_WAL_IO);

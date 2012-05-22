@@ -198,15 +198,25 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 	}
 }
 
+- (void) close
+{
+	if (worker != NULL) {
+		[self detachWorker];
+	}
+	[super close];
+}
+
 - (void) attachWorker: (struct fiber *)worker_
 {
-	assert(worker == NULL);
+	assert(worker == NULL && worker_->peer == nil);
 	worker = worker_;
+	worker->peer = self;
 }
 
 - (void) detachWorker
 {
-	assert(worker != NULL);
+	assert(worker != NULL && worker->peer == self);
+	worker->peer = nil;
 	worker = NULL;
 }
 
@@ -339,6 +349,16 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 - (void) onOutput
 {
 	[self coWork];
+}
+
+- (const char *) peer
+{
+	return NULL;
+}
+
+- (u64) cookie
+{
+	return 0;
 }
 
 @end

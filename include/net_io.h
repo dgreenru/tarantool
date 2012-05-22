@@ -99,7 +99,7 @@ struct service_config
 /**
  * Co-operative Network Connection.
  */
-@interface CoConnection : Connection {
+@interface CoConnection : Connection <FiberPeer> {
 	struct fiber *worker;
 }
 
@@ -178,8 +178,6 @@ struct service_config
 - (id) init: (Service *)service_ :(int)fd_;
 - (void) initPeer: (struct sockaddr_in *)addr;
 - (const char *) name;
-- (const char *) peer;
-- (u64) cookie;
 
 - (void) startWorker: (struct fiber *) worker_;
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
