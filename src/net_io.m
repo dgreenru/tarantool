@@ -34,9 +34,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
-/* Surrogate peer names */
-#define DEFAULT_PEER "default"
-#define UNKNOWN_PEER "unknown"
+#define DEFAULT_PEER "unknown"
 
 /* {{{ Event Handlers. ********************************************/
 
@@ -545,14 +543,14 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 
 - (void) onAccept: (int)fd :(struct sockaddr_in *)addr
 {
-	(void)addr;
 	/* Set socket options. */
 	sock_set_blocking(fd, false);
 	sock_set_option_nc(fd, IPPROTO_TCP, TCP_NODELAY);
-	/* Create a connection object. */
+	/* Create and initialize a connection object. */
 	ServiceConnection *conn = [self allocConnection];
 	[conn init: self :fd];
-	/* Delegate the connection use to a subclass. */
+	[conn initPeer: addr];
+	/* Delegate the use of the connection to a subclass. */
 	[self onConnect: conn];
 }
 
@@ -605,40 +603,24 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	return self;
 }
 
+- (void) initPeer: (struct sockaddr_in *)addr
+{
+	sock_address_string(addr, peer, sizeof(peer));
+	memcpy(&cookie, &addr, MIN(sizeof(addr), sizeof(cookie)));
+}
+
 - (const char *) name
 {
 	return name;
 }
 
-- (void) initPeer
-{
-	assert(fd >= 0);
-	/* Check if we already got the peer. */
-	if (strcmp(peer, DEFAULT_PEER) == 0) {
-		/* Get the peer address. */
-		struct sockaddr_in addr;
-		socklen_t addrlen = sizeof(addr);
-		if (sock_peer_name(fd, &addr, &addrlen) < 0) {
-			/* Failed to get it, use a dummy name. */
-			assert(strlen(UNKNOWN_PEER) < sizeof(peer));
-			strcpy(peer, UNKNOWN_PEER);
-		} else {
-			/* Got it, initialize the peer data. */
-			sock_address_string(&addr, peer, sizeof(peer));
-			memcpy(&cookie, &addr, MIN(sizeof(addr), sizeof(cookie)));
-		}
-	}
-}
-
 - (const char *) peer
 {
-	[self initPeer];
 	return peer;
 }
 
 - (u64) cookie
 {
-	[self initPeer];
 	return cookie;
 }
 

@@ -74,9 +74,7 @@ struct service_config
  * Generic Network Connection.
  */
 @interface Connection: Object <InputHandler, OutputHandler> {
-@public
 	int fd;
-@protected
 	struct ev_io input;
 	struct ev_io output;
 }
@@ -147,6 +145,7 @@ struct service_config
 
 @end
 
+
 /**
  * Generic Network Service.
  */
@@ -177,6 +176,7 @@ struct service_config
 }
 
 - (id) init: (Service *)service_ :(int)fd_;
+- (void) initPeer: (struct sockaddr_in *)addr;
 - (const char *) name;
 - (const char *) peer;
 - (u64) cookie;
