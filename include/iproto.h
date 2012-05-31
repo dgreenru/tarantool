@@ -28,31 +28,6 @@
 
 #include <third_party/queue.h>
 
-@class IProtoConnection;
-
-STAILQ_HEAD(input_queue, input_buffer);
-struct input_buffer
-{
-	STAILQ_ENTRY(input_buffer) next;
-	u32 size;
-	u8 data[];
-};
-
-STAILQ_HEAD(output_queue, output_buffer);
-struct output_buffer
-{
-	STAILQ_ENTRY(output_buffer) next;
-};
-
-STAILQ_HEAD(request_queue, request);
-struct request
-{
-	STAILQ_ENTRY(request) next;
-	struct connection *connection;
-	struct fiber *worker;
-};
-
-
 /*
  * struct iproto_header and struct iproto_header_retcode
  * share common prefix {msg_code, len, sync}
@@ -78,11 +53,56 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 	return (struct iproto_header *)t->data;
 }
 
+
+@class IProtoConnection;
+struct batch;
+struct inbuf;
+
+
+STAILQ_HEAD(output_queue, output_buffer);
+struct output_buffer
+{
+	STAILQ_ENTRY(output_buffer) next;
+};
+
+STAILQ_HEAD(request_queue, request);
+struct msg
+{
+	STAILQ_ENTRY(request) next;
+	IProtoConnection *connection;
+	struct fiber *worker;
+};
+
+
 /**
  * IProto Service.
  */
-@interface IProtoService: Service {
+@interface IProtoService: Service <PostIOHandler> {
+
+	/* Connection table. */
+	IProtoConnection **ctab;
+	int ctab_size;
+
+	/* Worker pool. */
+	struct fiber **pool;
+	int pool_busy;
+	int pool_idle;
+	struct fiber *standby_worker;
+
+	/* Shared input buffer. */
+	struct inbuf *inbuf;
+	struct batch *batch;
+
+	/* Post I/O */
+	struct ev_prepare post;
 }
+
+/* I/O entry points. */
+- (void) input: (IProtoConnection *)conn;
+- (void) output: (IProtoConnection *)conn;
+
+/* Fiber entry point. */
+- (void) process;
 
 /* Extension point. */
 - (void) process: (uint32_t)msg_code :(struct tbuf *)request;
@@ -94,12 +114,13 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
  * IProto Connection.
  */
 @interface IProtoConnection: ServiceConnection {
+@public
+	struct inbuf *inbuf;
 	//struct request_queue queue;
-	//struct input_queue input_queue;
 	//struct output_queue output_queue;
 }
 
-- (void) interact;
+- (int) fd;
 
 @end
 

@@ -41,6 +41,7 @@
 static void
 timer_cb(ev_watcher *watcher, int revents __attribute__((unused)))
 {
+	fprintf(stderr, "timer_cb\n");
 	id <TimerHandler> handler = watcher->data;
 	[handler onTimer];
 }
@@ -48,6 +49,7 @@ timer_cb(ev_watcher *watcher, int revents __attribute__((unused)))
 static void
 input_cb(ev_watcher *watcher, int revents __attribute__((unused)))
 {
+	fprintf(stderr, "input_cb\n");
 	id <InputHandler> handler = watcher->data;
 	[handler onInput];
 }
@@ -55,8 +57,25 @@ input_cb(ev_watcher *watcher, int revents __attribute__((unused)))
 static void
 output_cb(ev_watcher *watcher, int revents __attribute__((unused)))
 {
+	fprintf(stderr, "output_cb\n");
 	id <OutputHandler> handler = watcher->data;
 	[handler onOutput];
+}
+
+static void
+preio_cb(ev_watcher *watcher, int revents __attribute__((unused)))
+{
+	fprintf(stderr, "preio_cb\n");
+	id <PreIOHandler> handler = watcher->data;
+	[handler preIO];
+}
+
+static void
+postio_cb(ev_watcher *watcher, int revents __attribute__((unused)))
+{
+	fprintf(stderr, "postio_cb\n");
+	id <PostIOHandler> handler = watcher->data;
+	[handler postIO];
 }
 
 void
@@ -78,6 +97,18 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 {
 	watcher->data = handler;
 	ev_init(watcher, (void *) output_cb);
+}
+
+void ev_init_preio_handler(ev_check *watcher, id<PreIOHandler> handler)
+{
+	watcher->data = handler;
+	ev_init(watcher, (void *) preio_cb);
+}
+
+void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler)
+{
+	watcher->data = handler;
+	ev_init(watcher, (void *) postio_cb);
 }
 
 /* }}} */
@@ -306,6 +337,21 @@ ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
 
 - (void) coWriteV: (struct iovec *)iov :(int)iovcnt
 {
+	fprintf(stderr, "coWriteV:\n");
+	for (int i = 0; i < iovcnt; i++) {
+		fprintf(stderr, "  iov[%d]: (%d) '", i, (int) iov[i].iov_len);
+		for (int j = 0; j < iov[i].iov_len; j++) {
+			unsigned c = ((u8*)iov[i].iov_base)[j];
+			if (c == '\\')
+				fprintf(stderr, "\\\\");
+			else if (c >= 32 && c < 127)
+				fprintf(stderr, "%c", c);
+			else
+				fprintf(stderr, "\\%02x", c);
+		}
+		fprintf(stderr, "'\n");
+	}
+
 	[self startOutput];
 	@try {
 		for (;;) {

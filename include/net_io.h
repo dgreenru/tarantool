@@ -54,9 +54,19 @@
 - (void) onOutput;
 @end
 
+@protocol PreIOHandler
+- (void) preIO;
+@end
+
+@protocol PostIOHandler
+- (void) postIO;
+@end
+
 void ev_init_timer_handler(ev_timer *watcher, id<TimerHandler> handler);
 void ev_init_input_handler(ev_io *watcher, id<InputHandler> handler);
 void ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler);
+void ev_init_preio_handler(ev_check *watcher, id<PreIOHandler> handler);
+void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler);
 
 
 struct service_config
