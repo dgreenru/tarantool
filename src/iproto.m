@@ -67,9 +67,9 @@ const uint32_t msg_ping = 0xff00;
 
 struct inbuf
 {
+	SLIST_ENTRY(inbuf) next;
 	size_t start;
 	size_t count;
-	struct inbuf *next;
 	size_t size;
 	u8 data[];
 };
@@ -97,9 +97,7 @@ inbuf_create(size_t size)
 	}
 
 	/* Initialize the struct fields. */
-	inbuf->start = 0;
-	inbuf->count = 0;
-	inbuf->next = NULL;
+	memset(inbuf, 0, sizeof(struct inbuf));
 	inbuf->size = size;
 
 	return inbuf;
@@ -143,7 +141,6 @@ inbuf_split(struct inbuf *inbuf, size_t size)
 {
 	assert(inbuf->start > 0);
 	assert(inbuf->count > 0);
-	assert(inbuf->next == NULL);
 
 	/* Adjust the size to fit the data. */
 	if (size < inbuf->count) {
@@ -151,18 +148,17 @@ inbuf_split(struct inbuf *inbuf, size_t size)
 	}
 
 	/* Allocate a buffer for carry-over data. */
-	inbuf->next = inbuf_create(size);
-	if (unlikely(inbuf->next == NULL)) {
+	struct inbuf *split = inbuf_create(size);
+	if (unlikely(split == NULL)) {
 		return NULL;
 	}
 
 	/* Carry the data to the allocated buffer. */
-	memcpy(inbuf->next->data, inbuf->data + inbuf->start, inbuf->count);
-	inbuf->next->count = inbuf->count;
+	memcpy(split->data, inbuf->data + inbuf->start, inbuf->count);
+	split->count = inbuf->count;
 	inbuf->count = 0;
 
-	/* Adjust the old buffer. */
-	return inbuf_resize(inbuf, inbuf->start);
+	return split;
 }
 #endif
 
@@ -243,51 +239,45 @@ inbuf_fit_msg(struct inbuf *inbuf)
 	return inbuf;
 }
 
-static size_t
-inbuf_read(struct inbuf *inbuf, IProtoConnection *conn)
-{
-	/* Find unused area offset. */
-	size_t off = inbuf->start + inbuf->count;
-	/* Read trying to fill the area. */
-	size_t n = [conn read: inbuf->data + off :inbuf->size - off];
-	inbuf->count += n;
-	return n;
-}
-
 /* }}} */
 
 /* {{{ Input Batch. ***********************************************/
 
 struct batch
 {
+	struct inbuf *inbuf;
 	IProtoConnection *conn;
-	struct inbuf *data;
-	struct inbuf *tail;
-	struct batch *next;
+	union {
+		TAILQ_ENTRY(batch) link;
+		SLIST_ENTRY(batch) next;
+	};
+	bool input;
 };
 
-#if 0
 static struct batch *
-batch_create(IProtoConnection *conn)
+batch_create(void)
 {
 	struct batch *batch = malloc(sizeof(struct batch));
-	if (batch == NULL) {
+	if (unlikely(batch == NULL)) {
 		return NULL;
 	}
 
-	batch->conn = conn;
-	batch->data = NULL;
-	batch->tail = NULL;
-	batch->next = NULL;
+	memset(batch, 0, sizeof(struct batch));
 
 	return batch;
 }
 
-static void
-batch_handle(struct batch *batch)
+static size_t
+batch_input(struct batch *batch)
 {
+	struct inbuf *inbuf = batch->inbuf; 
+	/* Find unused area offset. */
+	size_t used = inbuf->start + inbuf->count;
+	/* Read trying to fill all the area. */
+	size_t n = [batch->conn read: inbuf->data + used :inbuf->size - used];
+	inbuf->count += n;
+	return n;
 }
-#endif
 
 /* }}} */
 
@@ -303,9 +293,7 @@ static void
 iproto_loop(IProtoService *service)
 {
 	for (;;) {
-		fprintf(stderr, "iproto loop cycle\n");
 		[service process];
-		fprintf(stderr, "iproto loop yield\n");
 		fiber_yield();
 	}
 }
@@ -329,13 +317,16 @@ iproto_loop(IProtoService *service)
 			abort();
 		}
 		pool_busy = 0;
-		pool_idle = 0;
+		pool_size = 0;
 
 		standby_worker = NULL;
 
-		inbuf = NULL;
+		SLIST_INIT(&inbuf_dropped);
+		TAILQ_INIT(&batch_running);
+		SLIST_INIT(&batch_dropped);
 
 		ev_init_postio_handler(&post, self);
+		ev_prepare_start(&post);
 	}
 	return self;
 }
@@ -379,6 +370,13 @@ iproto_loop(IProtoService *service)
 	ctab[n] = nil;
 }
 
+- (void) closeConnection: (IProtoConnection *)conn
+{
+	[self unregisterConnection: conn];
+	[conn close];
+	[conn free];
+}
+
 - (void) onConnect: (ServiceConnection *)conn
 {
 	@try {
@@ -391,54 +389,77 @@ iproto_loop(IProtoService *service)
 	}
 }
 
-- (struct fiber *) makeWorker
+- (struct inbuf *) takeInbuf
 {
-	int index = pool_busy + pool_idle;
-	if (index == POOL_SIZE) {
-		say_error("worker fibers exhauseted");
-		return NULL;
+	if (SLIST_EMPTY(&inbuf_dropped)) {
+		return inbuf_create([self readahead]);
 	}
 
-	IProtoFiberHelper *helper = [IProtoFiberHelper new];
-	if (helper == nil) {
-		say_error("can't create worker helper");
-		return NULL;
+	struct inbuf *inbuf = SLIST_FIRST(&inbuf_dropped);
+	SLIST_REMOVE_HEAD(&inbuf_dropped, next);
+	return inbuf;
+}
+
+- (void) dropInbuf: (struct inbuf *)inbuf
+{
+	inbuf_reset(inbuf);
+	SLIST_INSERT_HEAD(&inbuf_dropped, inbuf, next);
+}
+
+- (struct batch *) takeBatch
+{
+	if (SLIST_EMPTY(&batch_dropped)) {
+		return batch_create();
 	}
 
-	helper->connection = nil;
-	helper->pool_index = index;
+	struct batch *batch = SLIST_FIRST(&batch_dropped);
+	SLIST_REMOVE_HEAD(&batch_dropped, next);
+	return batch;
+}
 
-	struct fiber *worker = fiber_create("worker",
-					    (void (*)(void *)) iproto_loop,
-					    self);
-	if (worker == NULL) {
-		say_error("can't create worker fiber");
-		[helper free];
-		return NULL;
+- (void) dropBatch: (struct batch *)batch
+{
+	if (batch->inbuf) {
+		[self dropInbuf: batch->inbuf];
+		batch->inbuf = NULL;
 	}
-
-	worker->peer = helper;
-	pool[index] = worker;
-	pool_idle++;
-
-	return worker;
+	SLIST_INSERT_HEAD(&batch_dropped, batch, next);
 }
 
 - (struct fiber *) takeWorker
 {
-	struct fiber *worker;
-	if (pool_idle) {
-		worker = pool[pool_busy];
-	} else {
-		worker = [self makeWorker];
-		if (worker == NULL) {
+	/* Check to see if there is an idle fiber available immediately. */
+	if (pool_busy == pool_size) {
+		/* Check to see if the maximim pool size is reached. */
+		if (pool_size == POOL_SIZE) {
+			say_error("worker fibers exhauseted");
 			return NULL;
 		}
-		assert(pool_idle == 1);
+
+		/* Create a fiber helper object. */
+		IProtoFiberHelper *helper = [IProtoFiberHelper new];
+		if (helper == nil) {
+			say_error("can't create worker helper");
+			return NULL;
+		}
+
+		/* Create a fiber itself. */
+		struct fiber *worker = fiber_create("worker",
+						    (void (*)(void *)) iproto_loop,
+						    self);
+		if (worker == NULL) {
+			[helper free];
+			say_error("can't create worker fiber");
+			return NULL;
+		}
+
+		helper->connection = nil;
+		helper->pool_index = pool_size;
+		worker->peer = helper;
+
+		pool[pool_size++] = worker;
 	}
-	pool_busy++;
-	pool_idle--;
-	return worker;
+	return pool[pool_busy++];
 }
 
 - (void) dropWorker: (struct fiber *)worker
@@ -450,7 +471,6 @@ iproto_loop(IProtoService *service)
 	assert(pool[index] == worker);
 
 	pool_busy--;
-	pool_idle++;
 	if (index < pool_busy) {
 		helper->pool_index = pool_busy;
 		helper = (IProtoFiberHelper *) pool[pool_busy]->peer;
@@ -480,65 +500,23 @@ iproto_loop(IProtoService *service)
 	standby_worker = worker;
 }
 
-- (void) grabInputBuffer: (IProtoConnection *)conn
-{
-	if (conn->inbuf == NULL) {
-		/* There is no bound buffer. */
-		if (inbuf == NULL) {
-			/* There is no cached free buffer. */
-			inbuf = inbuf_create([self readahead]);
-		}
-	} else {
-		/* There is bound buffer. */
-		if (inbuf != NULL) {
-			/* There is cached free buffer. */
-			free(inbuf);
-		}
-		inbuf = inbuf_recycle(conn->inbuf,
-						    [self readahead]);
-		conn->inbuf = NULL;
-	}
-}
-
-- (void) bindInputBuffer: (IProtoConnection *)conn
-{
-	assert(conn->inbuf == NULL);
-	if (inbuf->count) {
-		conn->inbuf = inbuf;
-		inbuf = NULL;
-	}
-}
-
 - (void) process
 {
-	fprintf(stderr, "IProtoService process\n");
-
 	IProtoFiberHelper *helper = (IProtoFiberHelper *) fiber->peer;
 	assert(helper->pool_index >= 0);
 	assert(helper->pool_index < pool_busy);
 	assert(pool[helper->pool_index] == fiber);
+
 	IProtoConnection *conn = helper->connection; 
+	struct batch *batch = conn->batch;
+	struct inbuf *inbuf = batch->inbuf;
 
 	@try {
-
 		[conn stopInput];
-		fiber->flags &= ~FIBER_READY;
 
 		struct iproto_header *msg =
 			(struct iproto_header *)(inbuf->data + inbuf->start);
 		size_t msg_len = sizeof(struct iproto_header) + msg->len;
-
-		fprintf(stderr, "msg: (%d) '", (int) msg_len);
-		for (int j = 0; j < msg_len; j++) {
-			unsigned c = *(inbuf->data + inbuf->start + j);
-			if (c == '\\')
-				fprintf(stderr, "\\\\");
-			else if (c >= 32 && c < 127)
-				fprintf(stderr, "%c", c);
-			else
-				fprintf(stderr, "\\%02x", c);
-		}
-		fprintf(stderr, "'\n");
 
 		inbuf->start += msg_len;
 		inbuf->count -= msg_len;
@@ -585,94 +563,37 @@ iproto_loop(IProtoService *service)
 	}
 	@catch (SocketEOF *) {
 		[conn detachWorker];
-		[self unregisterConnection: conn];
-		[conn close];
-		[conn free];
+		[self closeConnection: conn];
 	}
 	@catch (SocketError *e) {
 		[conn detachWorker];
-		[self unregisterConnection: conn];
-		[conn close];
-		[conn free];
+		[self closeConnection: conn];
 		[e log];
 	}
 	@finally {
-		fiber->flags |= FIBER_READY;
+		if (inbuf->count == 0) {
+			[self dropInbuf: inbuf];
+			batch->inbuf = NULL;
+		}
+		TAILQ_INSERT_HEAD(&batch_running, batch, link);
 		[self freeWorker: fiber];
-	}
-}
-
-- (void) dispatchInput: (IProtoConnection *)conn
-{
-	fprintf(stderr, "IProtoService dispatchInput\n");
-
-	for (;;) {
-		/* Read the data. */
-		size_t n = inbuf_read(inbuf, conn);
-		if (n == 0) {
-			return;
-		}
-
-		/* Handle all complete messages in the buffer. */
-		while (inbuf_has_msg(inbuf)) {
-			struct fiber *worker = [self findWorker];
-			if (worker == NULL) {
-				/* TODO: wait for worker availability? */
-				@throw [SocketEOF new];
-			}
-			[conn attachWorker: worker];
-
-			fiber_call(worker);
-			fprintf(stderr, "fiber input back\n");
-
-			if ((worker->flags & FIBER_READY) == 0) {
-				/* Processing is not completed. */
-				fprintf(stderr, "fiber is not ready\n");
-				return;
-			}
-		}
-		fprintf(stderr, "fiber has no msg\n");
-
-		/* The data must not be available yet. */
-		if (!inbuf_is_full(inbuf)) {
-			fprintf(stderr, "fiber is not full\n");
-			return;
-		}
-
-		/* Otherwise the read was incomplete because there was no
-		   enough space in the buffer. Extend it and repeat. */
-		if (inbuf_fit_msg(inbuf) == NULL) {
-			/* TODO: handle out of mem properly --
-			   raise client error. */
-			@throw [SocketEOF new];
-		}
 	}
 }
 
 - (void) input: (IProtoConnection *)conn
 {
-	fprintf(stderr, "IProtoService input\n");
-	@try {
-		[self grabInputBuffer: conn];
-		[self dispatchInput: conn];
-		[self bindInputBuffer: conn];
-	}
-	@catch (SocketEOF *) {
-		[self unregisterConnection: conn];
-		[conn close];
-		[conn free];
-	}
-	@catch (SocketError *e) {
-		[self unregisterConnection: conn];
-		[conn close];
-		[conn free];
-		[e log];
-	}
-	@finally {
-		if (inbuf != NULL) {
-			inbuf_reset(inbuf);
+	if (conn->batch == NULL) {
+		/* There is no buffer bound to the connection. */
+		conn->batch = [self takeBatch];
+		if (conn->batch == NULL) {
+			/* TODO: handle out of mem properly --
+			   raise client error. */
+			abort();
 		}
+		conn->batch->conn = conn;
 	}
+	TAILQ_INSERT_TAIL(&batch_running, conn->batch, link);
+	conn->batch->input = true;
 }
 
 - (void) output: (IProtoConnection *)conn
@@ -680,27 +601,75 @@ iproto_loop(IProtoService *service)
 	@try {
 	}
 	@catch (SocketEOF *) {
-		[self unregisterConnection: conn];
-		[conn close];
-		[conn free];
+		[self closeConnection: conn];
 	}
 	@catch (SocketError *e) {
-		[self unregisterConnection: conn];
-		[conn close];
-		[conn free];
+		[self closeConnection: conn];
 		[e log];
 	}
 }
 
+- (bool) handleInput: (struct batch *)batch
+{
+again:
+	if (inbuf_has_msg(batch->inbuf)) {
+		return true;
+	}
+	if (inbuf_is_full(batch->inbuf)) {
+		batch->input = true;
+		if (inbuf_fit_msg(batch->inbuf) == NULL) {
+			/* TODO: handle out of mem properly --
+			   raise client error. */
+			@throw [SocketEOF new];
+		}
+	}
+	if (batch->input) {
+		batch->input = false;
+		if (batch_input(batch) > 0) {
+			goto again;
+		}
+	}
+
+	/* The data is not available yet. */
+	return false;
+}
+
 - (void) postIO
 {
-	struct batch **bpp = &batch;
-	for (;;) {
-		struct batch *bp = *bpp;
-		if (bp == NULL) {
-			break;
+	while (!TAILQ_EMPTY(&batch_running)) {
+		struct batch *batch = TAILQ_FIRST(&batch_running);
+		TAILQ_REMOVE(&batch_running, batch, link);
+
+		IProtoConnection *conn = batch->conn;
+		assert(batch == conn->batch);
+		@try {
+			if (batch->inbuf == NULL) {
+				batch->inbuf = [self takeInbuf];
+				if (batch->inbuf == NULL) {
+					/* TODO: handle out of mem properly --
+					  raise client error. */
+					return;
+				}
+			}
+
+			/* Handle input. */
+			if ([self handleInput: batch]) {
+				struct fiber *worker = [self findWorker];
+				if (worker == NULL) {
+					/* TODO: wait for worker availability? */
+					return;
+				}
+				[batch->conn attachWorker: worker];
+				fiber_call(worker);
+			}
 		}
-		bpp = &bp->next;
+		@catch (SocketEOF *) {
+			[self closeConnection: conn];
+		}
+		@catch (SocketError *e) {
+			[self closeConnection: conn];
+			[e log];
+		}
 	}
 }
 
@@ -723,16 +692,16 @@ iproto_loop(IProtoService *service)
 {
 	self = [super init: service_ :fd_];
 	if (self) {
-		inbuf = NULL;
+		batch = NULL;
 	}
 	return self;
 }
 
 - (void) close
 {
-	if (inbuf != NULL) {
-		free(inbuf);
-		inbuf = NULL;
+	if (batch != NULL) {
+		batch->conn = nil;
+		[(IProtoService *)service dropBatch: batch];
 	}
 	[super close];
 }

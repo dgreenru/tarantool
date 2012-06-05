@@ -45,7 +45,6 @@
 
 #define FIBER_NAME_MAXLEN 32
 
-#define FIBER_READY         0x1
 /** Can this fiber be cancelled? */
 #define FIBER_CANCELLABLE   0x2
 /** Indicates that a fiber has been cancelled. */

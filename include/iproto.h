@@ -28,6 +28,11 @@
 
 #include <third_party/queue.h>
 
+
+@class IProtoConnection;
+struct batch;
+struct inbuf;
+
 /*
  * struct iproto_header and struct iproto_header_retcode
  * share common prefix {msg_code, len, sync}
@@ -54,26 +59,6 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 }
 
 
-@class IProtoConnection;
-struct batch;
-struct inbuf;
-
-
-STAILQ_HEAD(output_queue, output_buffer);
-struct output_buffer
-{
-	STAILQ_ENTRY(output_buffer) next;
-};
-
-STAILQ_HEAD(request_queue, request);
-struct msg
-{
-	STAILQ_ENTRY(request) next;
-	IProtoConnection *connection;
-	struct fiber *worker;
-};
-
-
 /**
  * IProto Service.
  */
@@ -86,14 +71,15 @@ struct msg
 	/* Worker pool. */
 	struct fiber **pool;
 	int pool_busy;
-	int pool_idle;
+	int pool_size;
 	struct fiber *standby_worker;
 
-	/* Shared input buffer. */
-	struct inbuf *inbuf;
-	struct batch *batch;
+	/* Input queue. */
+	SLIST_HEAD(, inbuf) inbuf_dropped;
+	TAILQ_HEAD(, batch) batch_running;
+	SLIST_HEAD(, batch) batch_dropped;
 
-	/* Post I/O */
+	/* Post I/O event. */
 	struct ev_prepare post;
 }
 
@@ -115,9 +101,7 @@ struct msg
  */
 @interface IProtoConnection: ServiceConnection {
 @public
-	struct inbuf *inbuf;
-	//struct request_queue queue;
-	//struct output_queue output_queue;
+	struct batch *batch;
 }
 
 - (int) fd;
@@ -125,3 +109,4 @@ struct msg
 @end
 
 #endif
+
