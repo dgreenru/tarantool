@@ -533,6 +533,7 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	}
 	@catch (SocketError *e) {
 		[e log];
+		return;
 	}
 
 	/* Notify a derived object on the accept event. */
