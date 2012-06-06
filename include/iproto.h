@@ -64,6 +64,9 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
  */
 @interface IProtoService: Service <PostIOHandler> {
 
+	/* Post I/O event. */
+	struct ev_prepare post;
+
 	/* Connection table. */
 	IProtoConnection **ctab;
 	int ctab_size;
@@ -72,20 +75,12 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 	struct fiber **pool;
 	int pool_busy;
 	int pool_size;
-	struct fiber *standby_worker;
 
+@public
 	/* Input queue. */
-	SLIST_HEAD(, inbuf) inbuf_dropped;
 	TAILQ_HEAD(, batch) batch_running;
-	SLIST_HEAD(, batch) batch_dropped;
-
-	/* Post I/O event. */
-	struct ev_prepare post;
+	SLIST_HEAD(, inbuf) inbuf_dropped;
 }
-
-/* I/O entry points. */
-- (void) input: (IProtoConnection *)conn;
-- (void) output: (IProtoConnection *)conn;
 
 /* Fiber entry point. */
 - (void) process;

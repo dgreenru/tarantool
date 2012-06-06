@@ -247,11 +247,10 @@ struct batch
 {
 	struct inbuf *inbuf;
 	IProtoConnection *conn;
-	union {
-		TAILQ_ENTRY(batch) link;
-		SLIST_ENTRY(batch) next;
-	};
-	bool input;
+	TAILQ_ENTRY(batch) link;
+
+	unsigned running : 1; 
+	unsigned pending_input : 1;
 };
 
 static struct batch *
@@ -267,16 +266,43 @@ batch_create(void)
 	return batch;
 }
 
-static size_t
+static bool
 batch_input(struct batch *batch)
 {
 	struct inbuf *inbuf = batch->inbuf; 
-	/* Find unused area offset. */
-	size_t used = inbuf->start + inbuf->count;
-	/* Read trying to fill all the area. */
-	size_t n = [batch->conn read: inbuf->data + used :inbuf->size - used];
-	inbuf->count += n;
-	return n;
+
+again:
+	if (inbuf_has_msg(inbuf)) {
+		return true;
+	}
+
+	if (inbuf_is_full(inbuf)) {
+		batch->pending_input = 1;
+		if (inbuf_fit_msg(inbuf) == NULL) {
+			/* TODO: handle out of mem properly --
+			   raise client error. */
+			@throw [SocketEOF new];
+		}
+	}
+
+	if (batch->pending_input) {
+		batch->pending_input = 0;
+
+		iov_write(batch->conn);
+
+		/* Find unused area offset. */
+		size_t used = inbuf->start + inbuf->count;
+
+		/* Read trying to fill all the area. */
+		size_t n = [batch->conn read: inbuf->data + used :inbuf->size - used];
+		inbuf->count += n;
+		if (n > 0) {
+			goto again;
+		}
+	}
+
+	/* The data is not available yet. */
+	return false;
 }
 
 /* }}} */
@@ -319,11 +345,8 @@ iproto_loop(IProtoService *service)
 		pool_busy = 0;
 		pool_size = 0;
 
-		standby_worker = NULL;
-
-		SLIST_INIT(&inbuf_dropped);
 		TAILQ_INIT(&batch_running);
-		SLIST_INIT(&batch_dropped);
+		SLIST_INIT(&inbuf_dropped);
 
 		ev_init_postio_handler(&post, self);
 		ev_prepare_start(&post);
@@ -333,7 +356,16 @@ iproto_loop(IProtoService *service)
 
 - (Connection *) allocConnection
 {
-	return [IProtoConnection alloc];
+	IProtoConnection *conn = [IProtoConnection alloc];
+	if (conn != nil) {
+		conn->batch = batch_create();
+		if (conn->batch == NULL) {
+			[conn free];
+			return nil;
+		}
+		conn->batch->conn = conn;
+	}
+	return conn;
 }
 
 - (void) registerConnection: (IProtoConnection *)conn
@@ -406,24 +438,12 @@ iproto_loop(IProtoService *service)
 	SLIST_INSERT_HEAD(&inbuf_dropped, inbuf, next);
 }
 
-- (struct batch *) takeBatch
+- (void) removeBatch: (struct batch *)batch
 {
-	if (SLIST_EMPTY(&batch_dropped)) {
-		return batch_create();
+	if (batch->running) {
+		TAILQ_REMOVE(&batch_running, batch, link);
+		batch->running = 0;
 	}
-
-	struct batch *batch = SLIST_FIRST(&batch_dropped);
-	SLIST_REMOVE_HEAD(&batch_dropped, next);
-	return batch;
-}
-
-- (void) dropBatch: (struct batch *)batch
-{
-	if (batch->inbuf) {
-		[self dropInbuf: batch->inbuf];
-		batch->inbuf = NULL;
-	}
-	SLIST_INSERT_HEAD(&batch_dropped, batch, next);
 }
 
 - (struct fiber *) takeWorker
@@ -478,50 +498,6 @@ iproto_loop(IProtoService *service)
 		pool[index] = pool[pool_busy];
 		pool[pool_busy] = worker;
 	}
-}
-
-- (struct fiber *) findWorker
-{
-	struct fiber *worker;
-	if (standby_worker == NULL) {
-		worker = [self takeWorker];
-	} else {
-		worker = standby_worker;
-		standby_worker = NULL;
-	}
-	return worker;
-}
-
-- (void) freeWorker: (struct fiber *)worker
-{
-	if (standby_worker != NULL) {
-		[self dropWorker: standby_worker];
-	}
-	standby_worker = worker;
-}
-
-- (bool) inputMsg: (struct batch *)batch
-{
-again:
-	if (inbuf_has_msg(batch->inbuf)) {
-		return true;
-	}
-	if (inbuf_is_full(batch->inbuf)) {
-		batch->input = true;
-		if (inbuf_fit_msg(batch->inbuf) == NULL) {
-			/* TODO: handle out of mem properly --
-			   raise client error. */
-			@throw [SocketEOF new];
-		}
-	}
-	if (batch->input) {
-		batch->input = false;
-		if (batch_input(batch) > 0) {
-			goto again;
-		}
-	}
-	/* The data is not available yet. */
-	return false;
 }
 
 - (void) processMsg: (struct batch *)batch
@@ -580,6 +556,7 @@ again:
 		assert(batch == conn->batch);
 
 		TAILQ_REMOVE(&batch_running, batch, link);
+		batch->running = 0;
 
 		@try {
 			[conn attachWorker: fiber];
@@ -594,21 +571,16 @@ again:
 				}
 			}
 
-			size_t count = 0;
-			while ([self inputMsg: batch]) {
+			while (batch_input(batch)) {
 				[self processMsg: batch];
-				if (++count == 256) {
-					count = 0;
-					iov_write(conn);
-					fiber_gc();
-				}
 			}
+
 			iov_write(conn);
 			fiber_gc();
 
 			if (batch->inbuf->count == 0) {
-				[self dropBatch: batch];
-				conn->batch = NULL;
+				[self dropInbuf: batch->inbuf];
+				batch->inbuf = NULL;
 			}
 
 			[conn detachWorker];
@@ -626,49 +598,22 @@ again:
 			[e log];
 		}
 	}
-	[self freeWorker: fiber];
+	[self dropWorker: fiber];
 }
 
 - (void) postIO
 {
+	int workers = 0;
 	while (!TAILQ_EMPTY(&batch_running)) {
-		struct fiber *worker = [self findWorker];
+		struct fiber *worker = [self takeWorker];
 		if (worker == NULL) {
 			/* TODO: wait for worker availability? */
 			return;
 		}
 		fiber_call(worker);
+		workers++;
 	}
-	/*fprintf(stderr, "busy %d\n", pool_busy);*/
-}
-
-- (void) input: (IProtoConnection *)conn
-{
-	if (conn->batch == NULL) {
-		/* There is no buffer bound to the connection. */
-		conn->batch = [self takeBatch];
-		if (conn->batch == NULL) {
-			/* TODO: handle out of mem properly --
-			   raise client error. */
-			abort();
-		}
-		conn->batch->conn = conn;
-	}
-	TAILQ_INSERT_TAIL(&batch_running, conn->batch, link);
-	conn->batch->input = true;
-}
-
-- (void) output: (IProtoConnection *)conn
-{
-	@try {
-	}
-	@catch (SocketEOF *) {
-		[self closeConnection: conn];
-	}
-	@catch (SocketError *e) {
-		[self closeConnection: conn];
-		[e log];
-	}
+	fprintf(stderr, "workers taken: %d, still busy: %d\n", workers, pool_busy);
 }
 
 - (void) process: (uint32_t) msg_code :(struct tbuf *) request
@@ -686,20 +631,13 @@ again:
 
 @implementation IProtoConnection
 
-- (id) init: (Service *)service_ :(int)fd_
-{
-	self = [super init: service_ :fd_];
-	if (self) {
-		batch = NULL;
-	}
-	return self;
-}
-
 - (void) close
 {
 	if (batch != NULL) {
-		batch->conn = nil;
-		[(IProtoService *)service dropBatch: batch];
+		if (batch->running) {
+			[(IProtoService *)service removeBatch: batch];
+		}
+		free(batch);
 	}
 	[super close];
 }
@@ -731,7 +669,11 @@ again:
 
 - (void) onInput
 {
-	[(IProtoService *)service input: self];
+	IProtoService *iproto = (IProtoService *)service;
+	if (!batch->running) {
+		TAILQ_INSERT_TAIL(&iproto->batch_running, batch, link);
+	}
+	batch->pending_input = 1;
 }
 
 #if 0
