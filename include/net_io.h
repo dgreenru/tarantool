@@ -179,7 +179,9 @@ struct service_config
  * Service network connection.
  */
 @interface ServiceConnection : CoConnection {
+@public
 	Service *service;
+@protected
 	char name[SERVICE_NAME_MAXLEN];
 	char peer[SERVICE_NAME_MAXLEN];
 	u64 cookie;

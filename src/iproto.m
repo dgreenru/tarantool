@@ -37,6 +37,80 @@
 
 const uint32_t msg_ping = 0xff00;
 
+/* {{{ Connection Table. ******************************************/
+
+#define CTAB_INIT_SIZE 1024
+
+static IProtoConnection **ctab;
+static int ctab_size;
+
+/**
+ * Initialize the table.
+ */
+static void
+ctab_init(void)
+{
+	ctab = malloc(CTAB_INIT_SIZE * sizeof(IProtoConnection *));
+	if (ctab == NULL) {
+		abort();
+	}
+	while (ctab_size < CTAB_INIT_SIZE) {
+		ctab[ctab_size++] = nil;
+	}
+}
+
+/**
+ * Register a connection.
+ */
+static void
+ctab_register(IProtoConnection *conn)
+{
+	int n = [conn fd];
+	assert(n >= 0);
+
+	if (n >= ctab_size) {
+		int sz = ctab_size;
+		do {
+			sz *= 2;
+		} while (n >= sz);
+
+		ctab = realloc(ctab, sz * sizeof(IProtoConnection *));
+		if (ctab == NULL) {
+			abort();
+		}
+
+		while (ctab_size < sz) {
+			ctab[ctab_size++] = nil;
+		}
+	}
+
+	assert(ctab[n] == nil);
+	ctab[n] = conn;
+}
+
+/**
+ * Unregister a connection.
+ */
+static void
+ctab_unregister(IProtoConnection *conn)
+{
+	int n = [conn fd];
+	assert(n >= 0);
+	assert(n < ctab_size);
+	assert(ctab[n] == conn);
+	ctab[n] = nil;
+}
+
+void
+ctab_close(IProtoConnection *conn)
+{
+	ctab_unregister(conn);
+	[conn close];
+	[conn free];
+}
+
+/* }}} */
+
 /* {{{ IProto Fiber Helper. ***************************************/
 
 @interface IProtoFiberHelper: Object <FiberPeer> {
@@ -63,6 +137,84 @@ const uint32_t msg_ping = 0xff00;
 
 /* }}} */
 
+/* {{{ Worker Fiber Pool. *****************************************/
+
+#define POOL_SIZE 1024
+
+static struct fiber **pool;
+static int pool_busy;
+static int pool_size;
+
+/**
+ * Initialize the worker pool.
+ */
+static void
+pool_init(void)
+{
+	pool = malloc(POOL_SIZE * sizeof(struct fiber *));
+	if (pool == NULL) {
+		abort();
+	}
+	pool_busy = 0;
+	pool_size = 0;
+}
+
+static struct fiber *
+pool_take_worker(void (*handler)(void *), void *data)
+{
+	/* Check to see if there is an idle fiber available immediately. */
+	if (pool_busy == pool_size) {
+		/* Check to see if the maximim pool size is reached. */
+		if (pool_size == POOL_SIZE) {
+			say_error("worker fibers exhauseted");
+			return NULL;
+		}
+
+		/* Create a fiber helper object. */
+		IProtoFiberHelper *helper = [IProtoFiberHelper new];
+		if (helper == nil) {
+			say_error("can't create worker helper");
+			return NULL;
+		}
+
+		/* Create a fiber itself. */
+		struct fiber *worker = fiber_create("worker", handler, data);
+		if (worker == NULL) {
+			[helper free];
+			say_error("can't create worker fiber");
+			return NULL;
+		}
+
+		helper->connection = nil;
+		helper->pool_index = pool_size;
+		worker->peer = helper;
+
+		pool[pool_size++] = worker;
+	}
+	return pool[pool_busy++];
+}
+
+static void
+pool_drop_worker(struct fiber *worker)
+{
+	IProtoFiberHelper *helper = (IProtoFiberHelper *) worker->peer;
+	int index = helper->pool_index;
+	assert(index >= 0);
+	assert(index < pool_busy);
+	assert(pool[index] == worker);
+
+	pool_busy--;
+	if (index < pool_busy) {
+		helper->pool_index = pool_busy;
+		helper = (IProtoFiberHelper *) pool[pool_busy]->peer;
+		helper->pool_index = index;
+		pool[index] = pool[pool_busy];
+		pool[pool_busy] = worker;
+	}
+}
+
+/* }}} */
+
 /* {{{ Input Buffer. **********************************************/
 
 struct inbuf
@@ -74,13 +226,16 @@ struct inbuf
 	u8 data[];
 };
 
+/* Free buffer list. */
+static SLIST_HEAD(, inbuf) inbuf_dropped;
+
 /**
- * Make an input buffer empty.
+ * Initialize input buffers.
  */
-static inline void
-inbuf_reset(struct inbuf *inbuf)
+static void
+inbuf_init(void)
 {
-	inbuf->start = inbuf->count = 0;
+	SLIST_INIT(&inbuf_dropped);
 }
 
 /**
@@ -191,6 +346,15 @@ inbuf_recycle(struct inbuf *inbuf, size_t size)
 }
 
 /**
+ * Make an input buffer empty.
+ */
+static inline void
+inbuf_reset(struct inbuf *inbuf)
+{
+	inbuf->start = inbuf->count = 0;
+}
+
+/**
  * Check to see if there is no space left in the buffer.
  */
 static inline bool
@@ -239,6 +403,28 @@ inbuf_fit_msg(struct inbuf *inbuf)
 	return inbuf;
 }
 
+static struct inbuf *
+inbuf_take(size_t size)
+{
+	if (SLIST_EMPTY(&inbuf_dropped)) {
+		return inbuf_create(size);
+	}
+
+	struct inbuf *inbuf = SLIST_FIRST(&inbuf_dropped);
+	inbuf = inbuf_recycle(inbuf, size);
+	if (inbuf != NULL) {
+		SLIST_REMOVE_HEAD(&inbuf_dropped, next);
+	}
+	return inbuf;
+}
+
+void
+inbuf_drop(struct inbuf *inbuf)
+{
+	inbuf_reset(inbuf);
+	SLIST_INSERT_HEAD(&inbuf_dropped, inbuf, next);
+}
+
 /* }}} */
 
 /* {{{ Input Batch. ***********************************************/
@@ -253,18 +439,11 @@ struct batch
 	unsigned pending_input : 1;
 };
 
-static struct batch *
-batch_create(void)
-{
-	struct batch *batch = malloc(sizeof(struct batch));
-	if (unlikely(batch == NULL)) {
-		return NULL;
-	}
+/* Input queue. */
+static TAILQ_HEAD(, batch) batch_running;
 
-	memset(batch, 0, sizeof(struct batch));
-
-	return batch;
-}
+/* Post I/O event. */
+struct ev_prepare batch_postio;
 
 static bool
 batch_input(struct batch *batch)
@@ -305,24 +484,113 @@ again:
 	return false;
 }
 
-/* }}} */
+static void
+batch_process(void)
+{
+	while (!TAILQ_EMPTY(&batch_running)) {
+		struct batch *batch = TAILQ_FIRST(&batch_running);
+		TAILQ_REMOVE(&batch_running, batch, link);
+		batch->running = 0;
 
-/* {{{ IProto Service. ********************************************/
+		IProtoConnection *conn = batch->conn;
+		IProtoService *serv = (IProtoService *) conn->service;
+		assert(batch == conn->batch);
 
-#define CTAB_SIZE 1024
-#define POOL_SIZE 1024
+		@try {
+			[conn attachWorker: fiber];
+			[conn stopInput];
+
+			if (batch->inbuf == NULL) {
+				batch->inbuf = inbuf_take([serv readahead]);
+				if (batch->inbuf == NULL) {
+					/* TODO: handle out of mem properly --
+					   raise a client error. */
+					return;
+				}
+			}
+
+			while (batch_input(batch)) {
+				[serv process: batch];
+			}
+
+			iov_write(conn);
+			fiber_gc();
+
+			if (batch->inbuf->count == 0) {
+				inbuf_drop(batch->inbuf);
+				batch->inbuf = NULL;
+			}
+
+			[conn detachWorker];
+			[conn startInput];
+		}
+		@catch (SocketEOF *) {
+			iov_reset();
+			[conn detachWorker];
+			ctab_close(conn);
+		}
+		@catch (SocketError *e) {
+			iov_reset();
+			[conn detachWorker];
+			ctab_close(conn);
+			[e log];
+		}
+	}
+	pool_drop_worker(fiber);
+}
 
 /**
- * IProto fiber handler.
+ * Worker fiber handler routine.
  */
 static void
-iproto_loop(IProtoService *service)
+batch_worker(void *dummy __attribute__((unused)))
 {
 	for (;;) {
-		[service process];
+		batch_process();
 		fiber_yield();
 	}
 }
+
+static void
+batch_postio_dispatch(ev_watcher *watcher __attribute__((unused)),
+		      int revents __attribute__((unused)))
+{
+	int workers = 0;
+	while (!TAILQ_EMPTY(&batch_running)) {
+		struct fiber *worker = pool_take_worker(batch_worker, NULL);
+		if (worker == NULL) {
+			/* TODO: wait for worker availability? */
+			return;
+		}
+		fiber_call(worker);
+		workers++;
+	}
+	fprintf(stderr, "workers taken: %d, still busy: %d\n", workers, pool_busy);
+}
+
+static void
+batch_init(void)
+{
+	ev_init(&batch_postio, (void *) batch_postio_dispatch);
+	ev_prepare_start(&batch_postio);
+}
+
+static struct batch *
+batch_create(void)
+{
+	struct batch *batch = malloc(sizeof(struct batch));
+	if (unlikely(batch == NULL)) {
+		return NULL;
+	}
+
+	memset(batch, 0, sizeof(struct batch));
+
+	return batch;
+}
+
+/* }}} */
+
+/* {{{ IProto Service. ********************************************/
 
 @implementation IProtoService
 
@@ -330,26 +598,7 @@ iproto_loop(IProtoService *service)
 {
 	self = [super init: name :config];
 	if (self) {
-		ctab = malloc(CTAB_SIZE * sizeof(IProtoConnection *));
-		if (ctab == NULL) {
-			abort();
-		}
-		while (ctab_size < CTAB_SIZE) {
-			ctab[ctab_size++] = nil;
-		}
-
-		pool = malloc(POOL_SIZE * sizeof(struct fiber *));
-		if (pool == NULL) {
-			abort();
-		}
-		pool_busy = 0;
-		pool_size = 0;
-
 		TAILQ_INIT(&batch_running);
-		SLIST_INIT(&inbuf_dropped);
-
-		ev_init_postio_handler(&post, self);
-		ev_prepare_start(&post);
 	}
 	return self;
 }
@@ -368,51 +617,10 @@ iproto_loop(IProtoService *service)
 	return conn;
 }
 
-- (void) registerConnection: (IProtoConnection *)conn
-{
-	int n = [conn fd];
-	assert(n >= 0);
-
-	if (n >= ctab_size) {
-		int sz = ctab_size;
-		do {
-			sz *= 2;
-		} while (n >= sz);
-
-		ctab = realloc(ctab, sz * sizeof(IProtoConnection *));
-		if (ctab == NULL) {
-			abort();
-		}
-
-		while (ctab_size < sz) {
-			ctab[ctab_size++] = nil;
-		}
-	}
-
-	assert(ctab[n] == nil);
-	ctab[n] = conn;
-}
-
-- (void) unregisterConnection: (IProtoConnection *)conn
-{
-	int n = [conn fd];
-	assert(n >= 0);
-	assert(n < ctab_size);
-	assert(ctab[n] == conn);
-	ctab[n] = nil;
-}
-
-- (void) closeConnection: (IProtoConnection *)conn
-{
-	[self unregisterConnection: conn];
-	[conn close];
-	[conn free];
-}
-
 - (void) onConnect: (ServiceConnection *)conn
 {
 	@try {
-		[self registerConnection: (IProtoConnection *)conn];
+		ctab_register((IProtoConnection *)conn);
 		[conn startInput];
 	}
 	@catch (id) {
@@ -421,86 +629,7 @@ iproto_loop(IProtoService *service)
 	}
 }
 
-- (struct inbuf *) takeInbuf
-{
-	if (SLIST_EMPTY(&inbuf_dropped)) {
-		return inbuf_create([self readahead]);
-	}
-
-	struct inbuf *inbuf = SLIST_FIRST(&inbuf_dropped);
-	SLIST_REMOVE_HEAD(&inbuf_dropped, next);
-	return inbuf;
-}
-
-- (void) dropInbuf: (struct inbuf *)inbuf
-{
-	inbuf_reset(inbuf);
-	SLIST_INSERT_HEAD(&inbuf_dropped, inbuf, next);
-}
-
-- (void) removeBatch: (struct batch *)batch
-{
-	if (batch->running) {
-		TAILQ_REMOVE(&batch_running, batch, link);
-		batch->running = 0;
-	}
-}
-
-- (struct fiber *) takeWorker
-{
-	/* Check to see if there is an idle fiber available immediately. */
-	if (pool_busy == pool_size) {
-		/* Check to see if the maximim pool size is reached. */
-		if (pool_size == POOL_SIZE) {
-			say_error("worker fibers exhauseted");
-			return NULL;
-		}
-
-		/* Create a fiber helper object. */
-		IProtoFiberHelper *helper = [IProtoFiberHelper new];
-		if (helper == nil) {
-			say_error("can't create worker helper");
-			return NULL;
-		}
-
-		/* Create a fiber itself. */
-		struct fiber *worker = fiber_create("worker",
-						    (void (*)(void *)) iproto_loop,
-						    self);
-		if (worker == NULL) {
-			[helper free];
-			say_error("can't create worker fiber");
-			return NULL;
-		}
-
-		helper->connection = nil;
-		helper->pool_index = pool_size;
-		worker->peer = helper;
-
-		pool[pool_size++] = worker;
-	}
-	return pool[pool_busy++];
-}
-
-- (void) dropWorker: (struct fiber *)worker
-{
-	IProtoFiberHelper *helper = (IProtoFiberHelper *) worker->peer;
-	int index = helper->pool_index;
-	assert(index >= 0);
-	assert(index < pool_busy);
-	assert(pool[index] == worker);
-
-	pool_busy--;
-	if (index < pool_busy) {
-		helper->pool_index = pool_busy;
-		helper = (IProtoFiberHelper *) pool[pool_busy]->peer;
-		helper->pool_index = index;
-		pool[index] = pool[pool_busy];
-		pool[pool_busy] = worker;
-	}
-}
-
-- (void) processMsg: (struct batch *)batch
+- (void) process: (struct batch *)batch
 {
 	struct inbuf *inbuf = batch->inbuf;
 
@@ -548,74 +677,6 @@ iproto_loop(IProtoService *service)
 	}
 }
 
-- (void) process
-{
-	while (!TAILQ_EMPTY(&batch_running)) {
-		struct batch *batch = TAILQ_FIRST(&batch_running);
-		IProtoConnection *conn = batch->conn;
-		assert(batch == conn->batch);
-
-		TAILQ_REMOVE(&batch_running, batch, link);
-		batch->running = 0;
-
-		@try {
-			[conn attachWorker: fiber];
-			[conn stopInput];
-
-			if (batch->inbuf == NULL) {
-				batch->inbuf = [self takeInbuf];
-				if (batch->inbuf == NULL) {
-					/* TODO: handle out of mem properly --
-					   raise a client error. */
-					return;
-				}
-			}
-
-			while (batch_input(batch)) {
-				[self processMsg: batch];
-			}
-
-			iov_write(conn);
-			fiber_gc();
-
-			if (batch->inbuf->count == 0) {
-				[self dropInbuf: batch->inbuf];
-				batch->inbuf = NULL;
-			}
-
-			[conn detachWorker];
-			[conn startInput];
-		}
-		@catch (SocketEOF *) {
-			iov_reset();
-			[conn detachWorker];
-			[self closeConnection: conn];
-		}
-		@catch (SocketError *e) {
-			iov_reset();
-			[conn detachWorker];
-			[self closeConnection: conn];
-			[e log];
-		}
-	}
-	[self dropWorker: fiber];
-}
-
-- (void) postIO
-{
-	int workers = 0;
-	while (!TAILQ_EMPTY(&batch_running)) {
-		struct fiber *worker = [self takeWorker];
-		if (worker == NULL) {
-			/* TODO: wait for worker availability? */
-			return;
-		}
-		fiber_call(worker);
-		workers++;
-	}
-	fprintf(stderr, "workers taken: %d, still busy: %d\n", workers, pool_busy);
-}
-
 - (void) process: (uint32_t) msg_code :(struct tbuf *) request
 {
 	(void) msg_code;
@@ -635,7 +696,7 @@ iproto_loop(IProtoService *service)
 {
 	if (batch != NULL) {
 		if (batch->running) {
-			[(IProtoService *)service removeBatch: batch];
+			TAILQ_REMOVE(&batch_running, batch, link);
 		}
 		free(batch);
 	}
@@ -669,11 +730,10 @@ iproto_loop(IProtoService *service)
 
 - (void) onInput
 {
-	IProtoService *iproto = (IProtoService *)service;
-	if (!batch->running) {
-		TAILQ_INSERT_TAIL(&iproto->batch_running, batch, link);
-	}
 	batch->pending_input = 1;
+	if (!batch->running) {
+		TAILQ_INSERT_TAIL(&batch_running, batch, link);
+	}
 }
 
 #if 0
@@ -684,5 +744,18 @@ iproto_loop(IProtoService *service)
 #endif
 
 @end
+
+/* }}} */
+
+/* {{{ Initialization. ********************************************/
+
+void
+iproto_init(void)
+{
+	ctab_init();
+	pool_init();
+	inbuf_init();
+	batch_init();
+}
 
 /* }}} */

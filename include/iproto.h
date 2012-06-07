@@ -62,28 +62,11 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 /**
  * IProto Service.
  */
-@interface IProtoService: Service <PostIOHandler> {
-
-	/* Post I/O event. */
-	struct ev_prepare post;
-
-	/* Connection table. */
-	IProtoConnection **ctab;
-	int ctab_size;
-
-	/* Worker pool. */
-	struct fiber **pool;
-	int pool_busy;
-	int pool_size;
-
-@public
-	/* Input queue. */
-	TAILQ_HEAD(, batch) batch_running;
-	SLIST_HEAD(, inbuf) inbuf_dropped;
+@interface IProtoService: Service {
 }
 
-/* Fiber entry point. */
-- (void) process;
+/* Entry point. */
+- (void) process: (struct batch *)batch;
 
 /* Extension point. */
 - (void) process: (uint32_t)msg_code :(struct tbuf *)request;
@@ -103,5 +86,7 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 
 @end
 
-#endif
 
+void iproto_init(void);
+
+#endif
