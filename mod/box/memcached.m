@@ -359,8 +359,6 @@ memcached_handler(ServiceConnection *conn)
 		memcached_loop(conn);
 		iov_write(conn);
 	}
-	@catch (SocketEOF *) {
-	}
 	@catch (SocketError *e) {
 		[e log];
 	}

@@ -30,6 +30,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -44,6 +45,12 @@
 @end
 
 @implementation SocketEOF
+
+- (void) log
+{
+	say_debug("Socket is closed.");
+}
+
 @end
 
 /**
@@ -291,7 +298,8 @@ sock_writev(int fd, struct iovec *iov, int iovcnt)
 {
 	size_t orig_iovcnt = iovcnt;
 	while (iovcnt > 0) {
-		ssize_t n = writev(fd, iov, iovcnt);
+		int cnt = iovcnt < IOV_MAX ? iovcnt : IOV_MAX;
+		ssize_t n = writev(fd, iov, cnt);
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				break;

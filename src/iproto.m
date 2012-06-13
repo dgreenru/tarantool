@@ -467,8 +467,6 @@ again:
 	if (batch->pending_input) {
 		batch->pending_input = 0;
 
-		iov_write(batch->conn);
-
 		/* Find unused area offset. */
 		size_t used = inbuf->start + inbuf->count;
 
@@ -509,12 +507,16 @@ batch_process(void)
 				}
 			}
 
+			int count = 0;
 			while (batch_input(batch)) {
 				[serv process: batch];
+				count++;
 			}
 
 			iov_write(conn);
 			fiber_gc();
+
+			fprintf(stderr, "batch: %d\n", count);
 
 			if (batch->inbuf->count == 0) {
 				inbuf_drop(batch->inbuf);
@@ -523,11 +525,6 @@ batch_process(void)
 
 			[conn detachWorker];
 			[conn startInput];
-		}
-		@catch (SocketEOF *) {
-			iov_reset();
-			[conn detachWorker];
-			ctab_close(conn);
 		}
 		@catch (SocketError *e) {
 			iov_reset();
@@ -733,6 +730,7 @@ batch_create(void)
 	batch->pending_input = 1;
 	if (!batch->running) {
 		TAILQ_INSERT_TAIL(&batch_running, batch, link);
+		batch->running = 1;
 	}
 }
 
