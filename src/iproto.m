@@ -367,14 +367,24 @@ static inline bool
 inbuf_has_msg(struct inbuf *inbuf)
 {
 	/* Check if the message header is complete. */
-	size_t req_len = sizeof(struct iproto_header);
-	if (req_len > inbuf->count)
+	if (inbuf->count < sizeof(struct iproto_header))
 		return false;
 
-	/* Check if the entire message is complete. */
-	u8 *msg = inbuf->data + inbuf->start;
-	req_len += ((struct iproto_header *) msg)->len;
-	if (req_len > inbuf->count)
+	/* Get a header pointer. */
+	struct iproto_header *hdr =
+		(struct iproto_header *) (inbuf->data + inbuf->start);
+
+	/* Validate it. */
+	if (hdr->len > IPROTO_BODY_LEN_MAX) {
+		/* The message is too big, just close the connection
+		   for now to avoid a possible DoS attack. */
+		say_error("received package is too big: %llu",
+			  (unsigned long long)hdr->len);
+		@throw [SocketEOF new];
+	}
+
+	/* Check if the whole message is complete. */
+	if (inbuf->count < (sizeof(struct iproto_header) + hdr->len))
 		return false;
 
 	return true;

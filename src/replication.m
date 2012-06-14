@@ -39,6 +39,11 @@
 #include <sys/uio.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <limits.h>
+
+#include "fiber.h"
+#include "recovery.h"
+#include "log_io.h"
 
 /** Replication topology
  * ----------------------
@@ -127,7 +132,7 @@ replication_relay_recv(struct ev_io *w, int revents);
 
 /** Send a single row to the client. */
 static int
-replication_relay_send_row(struct recovery_state *r __attribute__((unused)), struct tbuf *t);
+replication_relay_send_row(struct tbuf *t);
 
 
 /*
@@ -597,7 +602,7 @@ replication_relay_loop(int client_sock)
 
 	ver = tbuf_alloc(fiber->gc_pool);
 	tbuf_append(ver, &default_version, sizeof(default_version));
-	replication_relay_send_row(NULL, ver);
+	replication_relay_send_row(ver);
 
 	/* init libev events handlers */
 	ev_default_loop(0);
@@ -608,7 +613,7 @@ replication_relay_loop(int client_sock)
 	ev_io_start(&sock_read_ev);
 
 	/* Initialize the recovery process */
-	recovery_init(NULL, cfg.wal_dir, replication_relay_send_row,
+	recovery_init(cfg.snap_dir, cfg.wal_dir, replication_relay_send_row,
 		      INT32_MAX, "fsync_delay", 0,
 		      RECOVER_READONLY);
 
@@ -641,8 +646,7 @@ replication_relay_recv(struct ev_io *w __attribute__((unused)),
 
 /** Send to row to client. */
 static int
-replication_relay_send_row(struct recovery_state *r __attribute__((unused)),
-			   struct tbuf *t)
+replication_relay_send_row(struct tbuf *t)
 {
 	u8 *data = t->data;
 	ssize_t bytes, len = t->size;

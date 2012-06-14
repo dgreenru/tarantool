@@ -47,12 +47,13 @@
 #include <fiber.h>
 #include <iproto.h>
 #include <latch.h>
-#include <log_io.h>
+#include <recovery.h>
 #include <crc32.h>
 #include <palloc.h>
 #include <salloc.h>
 #include <say.h>
 #include <stat.h>
+#include <limits.h>
 #include TARANTOOL_CONFIG
 #include <util.h>
 #include <third_party/gopt/gopt.h>
@@ -371,7 +372,7 @@ signal_init(void)
 	ev_signal_start(&sigs[3]);
 
 	atexit(signal_free);
-	tt_pthread_atfork(NULL, NULL, signal_reset);
+	(void) tt_pthread_atfork(NULL, NULL, signal_reset);
 }
 
 static void
@@ -516,7 +517,7 @@ main(int argc, char **argv)
 #ifndef HAVE_LIBC_STACK_END
 /*
  * GNU libc provides a way to get at the top of the stack. This
- * is, of course, not standard and doesn't work on non-GNU
+ * is, of course, not-standard and doesn't work on non-GNU
  * systems, such as FreeBSD. But as far as we're concerned, argv
  * is at the top of the main thread's stack, so save the address
  * of it.
@@ -749,10 +750,10 @@ main(int argc, char **argv)
 	replication_init();
 
 	/*
-	 * Load user init script.
-	 * The script should have access to Tarantool Lua API (box.cfg,
-	 * box.fiber, etc...) that is why script must run only after the server
-	 * was fully initialized.
+	 * Load user init script.  The script should have access
+	 * to Tarantool Lua API (box.cfg, box.fiber, etc...) that
+	 * is why script must run only after the server was fully
+	 * initialized.
 	 */
 	tarantool_lua_load_init_script(tarantool_L);
 

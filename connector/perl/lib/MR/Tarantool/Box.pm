@@ -81,7 +81,7 @@ use constant {
 sub IPROTOCLASS () { 'MR::IProto' }
 
 use vars qw/$VERSION %ERRORS/;
-$VERSION = 0.0.22;
+$VERSION = 0.0.24;
 
 BEGIN { *confess = \&MR::IProto::confess }
 
@@ -378,6 +378,7 @@ sub new {
             confess "space[$namespace] long_fields must be ARRAYREF" unless ref $ns->{long_fields} eq 'ARRAY';
             confess "space[$namespace] long_fields number must match format" if @{$ns->{long_fields}} != @{$ns->{long_field_format}};
             m/^[A-Za-z]/ or confess "space[$namespace] long_fields names must begin with [A-Za-z]: bad name $_" for @{$ns->{long_fields}};
+            $ns->{long_fields_hash} = { map { $ns->{long_fields}->[$_] => $_ } 0..$#{$ns->{long_fields}} };
         }
         $ns->{default_raw} = 1 if !defined$ns->{default_raw} and defined $ns->{hashify} and !$ns->{hashify};
     }
@@ -1276,7 +1277,7 @@ Returns false upon error.
 
 =item B<$field>
 
-Field-to-update number or name (see L</fields>).
+Field-to-update number or name (see L</fields>, L</LongTuple>).
 
 =item B<$op>
 
@@ -1339,16 +1340,28 @@ sub UpdateMulti {
     $flags |= WANT_RESULT if $param->{want_result};
 
     my $fmt = $namespace->{field_format};
+    my $long_fmt = $namespace->{long_field_format};
     my $fields_hash = $namespace->{fields_hash};
+    my $long_fields_hash = $namespace->{long_fields_hash};
 
     foreach (@op) {
         confess "$self->{name}: bad op <$_>" if ref ne 'ARRAY' or @$_ != 3;
         my ($field_num, $op, $value) = @$_;
+        my $long_field_num;
 
-        if($field_num =~ m/^[A-Za-z]/) {
+        if(ref $field_num eq 'ARRAY' && $long_fmt) {
+            my ($i, $n) = @$field_num;
+            if($n =~ m/^[A-Za-z]/) {
+                confess "no such long field $n in space $namespace->{name}($namespace->{space})" unless exists $long_fields_hash->{$n};
+                $n = $long_fields_hash->{$n};
+            }
+            $field_num = $n + @$fmt + $i*@$long_fmt;
+        } elsif($field_num =~ m/^[A-Za-z]/) {
             confess "no such field $field_num in space $namespace->{name}($namespace->{space})" unless exists $fields_hash->{$field_num};
             $field_num = $fields_hash->{$field_num};
         }
+
+        $long_field_num = ($field_num - @$fmt) % @$long_fmt if $field_num >= @$fmt && $long_fmt;
 
         my $field_type = $namespace->{string_keys}->{$field_num} ? 'string' : 'number';
 
@@ -1376,8 +1389,10 @@ sub UpdateMulti {
         $value = [ $value ] unless ref $value;
         confess "dunno what to do with ref `$value'" if ref $value ne 'ARRAY';
 
-        confess "bad fieldnum: $field_num" if $field_num >= @$fmt;
-        $value = pack($update_arg_fmt{$op} || $fmt->[$field_num], @$value);
+        confess "bad fieldnum: $field_num" if $field_num >= @$fmt && !defined $long_field_num;
+        confess "bad long_fieldnum: $long_field_num" if defined $long_field_num && $long_field_num >= @$long_fmt;
+
+        $value = pack($update_arg_fmt{$op} || ($field_num < @$fmt ? $fmt->[$field_num] : $long_fmt->[$long_field_num]), @$value);
         $_ = pack('LCw/a*', $field_num, $op, $value);
     }
 
@@ -1502,9 +1517,9 @@ If C<format> given to L</new>, or C<unpack_format> given to L</Call> ends with a
 I<long tuple> is enabled. Last field or group of fields of C<format> represent variable-length
 tail of the tuple. C<long_fields> option given to L</new> will fold the tail into array of hashes.
 
-    $box->Insert(1,"2",3);
-    $box->Insert(3,"2",3,4,5);
-    $box->Insert(5,"2",3,4,5,6,7);
+    $box->Insert(1,"2",3);         #1
+    $box->Insert(3,"2",3,4,5);     #2
+    $box->Insert(5,"2",3,4,5,6,7); #3
 
 If we set up
 
@@ -1516,9 +1531,9 @@ we'll get:
 
     $result = $box->Select([1,2,3,4,5]);
     $result = [
-        { a => 1, b => "2", c => 3, d => [] },
-        { a => 3, b => "2", c => 3, d => [4,5] },
-        { a => 5, b => "2", c => 3, d => [4,5,6,7] },
+        { a => 1, b => "2", c => 3, d => [] },        #1
+        { a => 3, b => "2", c => 3, d => [4,5] },     #2
+        { a => 5, b => "2", c => 3, d => [4,5,6,7] }, #3
     ];
 
 And if we set up
@@ -1530,11 +1545,25 @@ And if we set up
 we'll get:
 
     $result = [
-        { a => 1, b => "2", c => 3, d => [] },
-        { a => 3, b => "2", c => 3, d => [{d1=>4, d2=>5}] },
-        { a => 5, b => "2", c => 3, d => [{d1=>4, d2=>5}, {d1=>6, d2=>7}] },
+        { a => 1, b => "2", c => 3, d => [] },                               #1
+        { a => 3, b => "2", c => 3, d => [{d1=>4, d2=>5}] },                 #2
+        { a => 5, b => "2", c => 3, d => [{d1=>4, d2=>5}, {d1=>6, d2=>7}] }, #3
     ];
 
+L</UpdateMulti> can be given a field number in several ways:
+
+=over
+
+=item $linear_index_int
+
+    $box->UpdateMulti(5, [ 5 => set => $val ]) #3: set 6 to $val
+
+=item an arrayref of [$index_of_folded_subtuple_int, $long_field_name_str_or_index_int] 
+
+    $box->UpdateMulti(5, [ [1,0]    => set => $val ]) #3: set 6 to $val
+    $box->UpdateMulti(5, [ [1,'d1'] => set => $val ]) #3: set 6 to $val
+
+=back
 
 =head2 utf8
 

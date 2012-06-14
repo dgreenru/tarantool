@@ -48,35 +48,35 @@
 
 @implementation SystemError
 
-- (id) init: (char*)msg, ...
+- (id) init: (const char *) format, ...
 {
 	va_list ap;
-	va_start(ap, msg);
-	[self init: errno :msg :ap];
+	va_start(ap, format);
+	[self init: errno :format :ap];
 	va_end(ap);
 	return self;
 }
 
-- (id) init: (int)err :(char *)msg, ...
+- (id) init: (int)errnum_arg: (const char *)format, ...
 {
 	va_list ap;
-	va_start(ap, msg);
-	[self init: err :msg :ap];
+	va_start(ap, format);
+	[self init: errnum_arg :format: ap];
 	va_end(ap);
 	return self;
 }
 
-- (id) init: (int)err :(char *)msg :(va_list)ap
+- (id) init: (int)errnum_arg :(const char *)format: (va_list)ap
 {
 	self = [super init];
-	error = err;
-	vsnprintf(errmsg, sizeof(errmsg), msg, ap);
+	errnum = errnum_arg;
+	vsnprintf(errmsg, sizeof(errmsg), format, ap);
 	return self;
 }
 
 - (void) log
 {
-	say(S_ERROR, strerror(error), "%s", errmsg);
+	say(S_ERROR, strerror(errnum), "%s", errmsg);
 }
 
 @end

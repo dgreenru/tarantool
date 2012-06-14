@@ -25,20 +25,22 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <tbuf.h>
+#include <stdbool.h>
 #include <util.h>
-#include <log_io.h>
+
+struct tarantool_cfg;
+struct tbuf;
+struct log_io;
+struct nbatch;
 
 void mod_init(void);
 void mod_free(void);
-struct tarantool_cfg;
 
 extern const char *mod_name;
 i32 mod_check_config(struct tarantool_cfg *conf);
 i32 mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf);
 int mod_cat(const char *filename);
-void mod_snapshot(struct log_io_iter *);
+void mod_snapshot(struct log_io *, struct nbatch *batch);
 void mod_info(struct tbuf *out);
 
 extern struct tarantool_cfg cfg;

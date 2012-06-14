@@ -29,7 +29,7 @@
 #include "txn.h"
 #include "tuple.h"
 #include "space.h"
-#include <log_io.h>
+#include <recovery.h>
 #include <fiber.h>
 
 static void
@@ -78,8 +78,6 @@ txn_add_undo(struct txn *txn, struct space *space,
 	/* txn_add_undo() must be done after txn_add_redo() */
 	assert(txn->op != 0);
 	txn->new_tuple = new_tuple;
-	txn->old_tuple = old_tuple;
-	txn->space = space;
 	if (new_tuple == NULL) {                /* DELETE */
 		if (old_tuple == NULL) {
 			/*
@@ -114,6 +112,12 @@ txn_add_undo(struct txn *txn, struct space *space,
 	} else {                                /* REPLACE */
 		txn_lock(txn, old_tuple);
 	}
+	/* Remember the old tuple only if we locked it
+	 * successfully, to not unlock a tuple locked by another
+	 * transaction in rollback().
+	 */
+	txn->old_tuple = old_tuple;
+	txn->space = space;
 }
 
 struct txn *
@@ -131,9 +135,8 @@ txn_commit(struct txn *txn)
 	if (! (txn->txn_flags & BOX_NOT_STORE)) {
 		u64 cookie = fiber_peer_cookie(fiber);
 		i64 lsn = next_lsn(recovery_state, 0);
-		int res = wal_write(recovery_state, wal_tag,
-				    txn->op,
-				    cookie, lsn, &txn->req);
+		int res = wal_write(recovery_state, lsn, cookie,
+				    txn->op, &txn->req);
 		confirm_lsn(recovery_state, lsn);
 		if (res)
 			tnt_raise(LoggedError, :ER_WAL_IO);

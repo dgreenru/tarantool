@@ -54,13 +54,14 @@
 	@public
 		/* errno code */
 		int error;
+		int errnum;
 		/* error description */
 		char errmsg[TNT_ERRMSG_MAX];
 }
 
-- (id) init: (char*)msg, ...;
-- (id) init: (int)err :(char *)msg, ...;
-- (id) init: (int)err :(char *)msg :(va_list)ap;
+- (id) init: (const char *)msg, ...;
+- (id) init: (int)errnum_arg: (const char *)format, ...;
+- (id) init: (int)errnum_arg: (const char *)format: (va_list)ap;
 - (void) log;
 @end
 

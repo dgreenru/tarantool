@@ -29,12 +29,13 @@
 #include <cfg/warning.h>
 #include <errcode.h>
 #include <fiber.h>
-#include <net_io.h>
+#include <recovery.h>
 #include <log_io.h>
 #include <pickle.h>
 #include <say.h>
 #include <stat.h>
 #include <tarantool.h>
+#include <iproto.h>
 
 #include <cfg/tarantool_box_cfg.h>
 #include <mod/box/tuple.h>
@@ -50,8 +51,6 @@ static void box_process_ro(struct txn *txn, Port *port,
 static void box_process_rw(struct txn *txn, Port *port,
 			   u32 op, struct tbuf *request_data);
 box_process_func box_process = box_process_ro;
-
-extern pid_t logger_pid;
 
 const char *mod_name = "Box";
 
@@ -120,13 +119,13 @@ box_process_ro(struct txn *txn, Port *port,
 	return box_process_rw(txn, port, op, request_data);
 }
 
-static int
+static void
 box_xlog_sprint(struct tbuf *buf, const struct tbuf *t)
 {
-	struct row_v11 *row = row_v11(t);
+	struct header_v11 *row = header_v11(t);
 
 	struct tbuf *b = palloc(fiber->gc_pool, sizeof(*b));
-	b->data = row->data;
+	b->data = t->data + sizeof(struct header_v11);
 	b->size = row->len;
 	u16 tag, op;
 	u64 cookie;
@@ -209,39 +208,43 @@ box_xlog_sprint(struct tbuf *buf, const struct tbuf *t)
 	default:
 		tbuf_printf(buf, "unknown wal op %" PRIi32, op);
 	}
-	return 0;
-}
-
-
-static int
-snap_print(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
-{
-	struct tbuf *out = tbuf_alloc(t->pool);
-	struct box_snap_row *row;
-	struct row_v11 *raw_row = row_v11(t);
-
-	struct tbuf *b = palloc(fiber->gc_pool, sizeof(*b));
-	b->data = raw_row->data;
-	b->size = raw_row->len;
-
-	(void)read_u16(b); /* drop tag */
-	(void)read_u64(b); /* drop cookie */
-
-	row = box_snap_row(b);
-
-	tuple_print(out, row->tuple_size, row->data);
-	printf("n:%i %*s\n", row->space, (int) out->size, (char *)out->data);
-	return 0;
 }
 
 static int
-xlog_print(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
+snap_print(struct tbuf *t)
 {
-	struct tbuf *out = tbuf_alloc(t->pool);
-	int res = box_xlog_sprint(out, t);
-	if (res >= 0)
+	@try {
+		struct tbuf *out = tbuf_alloc(t->pool);
+		struct header_v11 *raw_row = header_v11(t);
+		struct tbuf *b = palloc(t->pool, sizeof(*b));
+		b->data = t->data + sizeof(struct header_v11);
+		b->size = raw_row->len;
+
+		(void)read_u16(b); /* drop tag */
+		(void)read_u64(b); /* drop cookie */
+
+		struct box_snap_row *row =  box_snap_row(b);
+
+		tuple_print(out, row->tuple_size, row->data);
+		printf("n:%i %*s\n", row->space, (int) out->size,
+		       (char *)out->data);
+	} @catch (id e) {
+		return -1;
+	}
+	return 0;
+}
+
+static int
+xlog_print(struct tbuf *t)
+{
+	@try {
+		struct tbuf *out = tbuf_alloc(t->pool);
+		box_xlog_sprint(out, t);
 		printf("%*s\n", (int)out->size, (char *)out->data);
-	return res;
+	} @catch (id e) {
+		return -1;
+	}
+	return 0;
 }
 
 static struct tbuf *
@@ -262,27 +265,27 @@ convert_snap_row_to_wal(struct tbuf *t)
 }
 
 static int
-recover_row(struct recovery_state *r __attribute__((unused)), struct tbuf *t)
+recover_row(struct tbuf *t)
 {
 	/* drop wal header */
-	if (tbuf_peek(t, sizeof(struct row_v11)) == NULL)
+	if (tbuf_peek(t, sizeof(struct header_v11)) == NULL)
 		return -1;
-
-	u16 tag = read_u16(t);
-	read_u64(t); /* drop cookie */
-	if (tag == snap_tag)
-		t = convert_snap_row_to_wal(t);
-	else if (tag != wal_tag) {
-		say_error("unknown row tag: %i", (int)tag);
-		return -1;
-	}
-
-	u16 op = read_u16(t);
-
-	struct txn *txn = txn_begin();
-	txn->txn_flags |= BOX_NOT_STORE;
 
 	@try {
+		u16 tag = read_u16(t);
+		read_u64(t); /* drop cookie */
+		if (tag == SNAP)
+			t = convert_snap_row_to_wal(t);
+		else if (tag != XLOG) {
+			say_error("unknown row tag: %i", (int)tag);
+			return -1;
+		}
+
+		u16 op = read_u16(t);
+
+		struct txn *txn = txn_begin();
+		txn->txn_flags |= BOX_NOT_STORE;
+
 		box_process_rw(txn, port_null, op, t);
 	}
 	@catch (id e) {
@@ -423,7 +426,7 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 		if (!old_is_replica && new_is_replica)
 			memcached_stop_expire();
 
-		if (recovery_state->remote_recovery)
+		if (recovery_state->remote)
 			recovery_stop_remote(recovery_state);
 
 		box_enter_master_or_replica_mode(new_conf);
@@ -552,31 +555,27 @@ mod_init(void)
 int
 mod_cat(const char *filename)
 {
-	return read_log(filename, xlog_print, snap_print, NULL);
+	return read_log(filename, xlog_print, snap_print);
 }
 
 static void
-snapshot_write_tuple(struct log_io_iter *i, unsigned n, struct tuple *tuple)
+snapshot_write_tuple(struct log_io *l, struct nbatch *batch,
+		     unsigned n, struct tuple *tuple)
 {
-	struct tbuf *row;
-	struct box_snap_row header;
-
 	if (tuple->flags & GHOST)	// do not save fictive rows
 		return;
 
+	struct box_snap_row header;
 	header.space = n;
 	header.tuple_size = tuple->field_count;
 	header.data_size = tuple->bsize;
 
-	row = tbuf_alloc(fiber->gc_pool);
-	tbuf_append(row, &header, sizeof(header));
-	tbuf_append(row, tuple->data, tuple->bsize);
-
-	snapshot_write_row(i, snap_tag, default_cookie, row);
+	snapshot_write_row(l, batch, (void *) &header, sizeof(header),
+			   tuple->data, tuple->bsize);
 }
 
 void
-mod_snapshot(struct log_io_iter *i)
+mod_snapshot(struct log_io *l, struct nbatch *batch)
 {
 	struct tuple *tuple;
 
@@ -589,7 +588,7 @@ mod_snapshot(struct log_io_iter *i)
 		struct iterator *it = pk->position;
 		[pk initIterator: it :ITER_FORWARD];
 		while ((tuple = it->next(it))) {
-			snapshot_write_tuple(i, n, tuple);
+			snapshot_write_tuple(l, batch, n, tuple);
 		}
 	}
 }
@@ -597,14 +596,6 @@ mod_snapshot(struct log_io_iter *i)
 void
 mod_info(struct tbuf *out)
 {
-	tbuf_printf(out, "  version: \"%s\"" CRLF, tarantool_version());
-	tbuf_printf(out, "  uptime: %i" CRLF, (int)tarantool_uptime());
-	tbuf_printf(out, "  pid: %i" CRLF, getpid());
-	tbuf_printf(out, "  logger_pid: %i" CRLF, logger_pid);
-	tbuf_printf(out, "  lsn: %" PRIi64 CRLF, recovery_state->confirmed_lsn);
-	tbuf_printf(out, "  recovery_lag: %.3f" CRLF, recovery_state->recovery_lag);
-	tbuf_printf(out, "  recovery_last_update: %.3f" CRLF,
-		    recovery_state->recovery_last_update_tstamp);
 	tbuf_printf(out, "  status: %s" CRLF, status);
 }
 

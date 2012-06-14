@@ -23,22 +23,15 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#include "log_io.h"
-#include "fiber.h"
+#include "recovery.h"
 
-#include <sys/types.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
-#include <errno.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
-#include <say.h>
-#include <pickle.h>
 #include <net_io.h>
+#include <log_io.h>
+#include <pickle.h>
 
 static int
 remote_apply_row(struct recovery_state *r, struct tbuf *row);
@@ -57,12 +50,12 @@ static struct tbuf *
 remote_row_reader_v11(CoConnection *conn)
 {
 	@try {
-		ssize_t to_read = sizeof(struct row_v11) - fiber->rbuf->size;
+		ssize_t to_read = sizeof(struct header_v11) - fiber->rbuf->size;
 		if (to_read > 0) {
 			[conn coReadAhead: fiber->rbuf :to_read];
 		}
 
-		ssize_t request_len = row_v11(fiber->rbuf)->len + sizeof(struct row_v11);
+		ssize_t request_len = header_v11(fiber->rbuf)->len + sizeof(struct header_v11);
 		to_read = request_len - fiber->rbuf->size;
 		if (to_read > 0) {
 			[conn coReadAhead: fiber->rbuf :to_read];
@@ -135,11 +128,11 @@ pull_from_remote(void *state)
 	@try {
 		for (;;) {
 			fiber_setcancelstate(true);
-			row = remote_read_row(&r->remote_addr, r->confirmed_lsn + 1);
+			row = remote_read_row(&r->remote->addr, r->confirmed_lsn + 1);
 			fiber_setcancelstate(false);
 
-			r->recovery_lag = ev_now() - row_v11(row)->tm;
-			r->recovery_last_update_tstamp = ev_now();
+			r->remote->recovery_lag = ev_now() - header_v11(row)->tm;
+			r->remote->recovery_last_update_tstamp = ev_now();
 
 			if (remote_apply_row(r, row) < 0) {
 				close_connection();
@@ -158,22 +151,25 @@ static int
 remote_apply_row(struct recovery_state *r, struct tbuf *row)
 {
 	struct tbuf *data;
-	i64 lsn = row_v11(row)->lsn;
+	i64 lsn = header_v11(row)->lsn;
 	u16 tag;
 	u16 op;
 
 	/* save row data since wal_row_handler may clobber it */
 	data = tbuf_alloc(row->pool);
-	tbuf_append(data, row_v11(row)->data, row_v11(row)->len);
+	tbuf_append(data, row->data + sizeof(struct header_v11), header_v11(row)->len);
 
-	if (r->row_handler(r, row) < 0)
+	if (r->row_handler(row) < 0)
 		panic("replication failure: can't apply row");
 
 	tag = read_u16(data);
-	(void)read_u64(data); /* drop the cookie */
+	(void) tag;
+	(void) read_u64(data); /* drop the cookie */
 	op = read_u16(data);
 
-	if (wal_write(r, tag, op, r->cookie, lsn, data))
+	assert(tag == XLOG);
+
+	if (wal_write(r, lsn, r->remote->cookie, op, data))
 		panic("replication failure: can't write row to WAL");
 
 	next_lsn(r, lsn);
@@ -183,7 +179,7 @@ remote_apply_row(struct recovery_state *r, struct tbuf *row)
 }
 
 void
-recovery_follow_remote(struct recovery_state *r, const char *remote)
+recovery_follow_remote(struct recovery_state *r, const char *addr)
 {
 	char name[FIBER_NAME_MAXLEN];
 	char ip_addr[32];
@@ -192,16 +188,16 @@ recovery_follow_remote(struct recovery_state *r, const char *remote)
 	struct fiber *f;
 	struct in_addr server;
 
-	assert(r->remote_recovery == NULL);
+	assert(r->remote == NULL);
 
-	say_crit("initializing the replica, WAL master %s", remote);
-	snprintf(name, sizeof(name), "replica/%s", remote);
+	say_crit("initializing the replica, WAL master %s", addr);
+	snprintf(name, sizeof(name), "replica/%s", addr);
 
 	f = fiber_create(name, pull_from_remote, r);
 	if (f == NULL)
 		return;
 
-	rc = sscanf(remote, "%31[^:]:%i", ip_addr, &port);
+	rc = sscanf(addr, "%31[^:]:%i", ip_addr, &port);
 	assert(rc == 2);
 	(void)rc;
 
@@ -210,20 +206,21 @@ recovery_follow_remote(struct recovery_state *r, const char *remote)
 		return;
 	}
 
-	memset(&r->remote_addr, 0, sizeof(r->remote_addr));
-	r->remote_addr.sin_family = AF_INET;
-	memcpy(&r->remote_addr.sin_addr.s_addr, &server, sizeof(server));
-	r->remote_addr.sin_port = htons(port);
-	memcpy(&r->cookie, &r->remote_addr, MIN(sizeof(r->cookie), sizeof(r->remote_addr)));
+	static struct remote remote;
+	memset(&remote, 0, sizeof(remote));
+	remote.addr.sin_family = AF_INET;
+	memcpy(&remote.addr.sin_addr.s_addr, &server, sizeof(server));
+	remote.addr.sin_port = htons(port);
+	memcpy(&remote.cookie, &remote.addr, MIN(sizeof(remote.cookie), sizeof(remote.addr)));
+	remote.reader = f;
+	r->remote = &remote;
 	fiber_call(f);
-	r->remote_recovery = f;
 }
 
 void
 recovery_stop_remote(struct recovery_state *r)
 {
 	say_info("shutting down the replica");
-	fiber_cancel(r->remote_recovery);
-	r->remote_recovery = NULL;
-	memset(&r->remote_addr, 0, sizeof(r->remote_addr));
+	fiber_cancel(r->remote->reader);
+	r->remote = NULL;
 }
