@@ -68,6 +68,7 @@ void ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler);
 void ev_init_preio_handler(ev_check *watcher, id<PreIOHandler> handler);
 void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler);
 
+void net_io_init(void);
 
 struct service_config
 {

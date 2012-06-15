@@ -110,6 +110,50 @@ void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler)
 
 /* {{{ Generic Network Connection. ********************************/
 
+#define CTAB_INIT_SIZE 1024
+
+static Connection **ctab;
+static int ctab_size;
+
+/**
+ * Initialize the connection table.
+ */
+static void
+ctab_init(void)
+{
+	ctab = malloc(CTAB_INIT_SIZE * sizeof(Connection *));
+	if (ctab == NULL) {
+		abort();
+	}
+	while (ctab_size < CTAB_INIT_SIZE) {
+		ctab[ctab_size++] = nil;
+	}
+}
+
+/**
+ * Ensure the connection table size.
+ */
+static void
+ctab_ensure_size(int n)
+{
+	if (n >= ctab_size) {
+		int sz = ctab_size;
+		do {
+			sz *= 2;
+		} while (n >= sz);
+
+		ctab = realloc(ctab, sz * sizeof(Connection *));
+		if (ctab == NULL) {
+			abort();
+		}
+
+		while (ctab_size < sz) {
+			ctab[ctab_size++] = nil;
+		}
+	}
+
+}
+
 @implementation Connection
 
 - (id) init: (int)fd_
@@ -120,6 +164,11 @@ void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler)
 	if (self) {
 		/* Set socket fd. */
 		fd = fd_;
+
+		/* Register the connection. */
+		ctab_ensure_size(fd);
+		assert(ctab[fd] == nil);
+		ctab[fd] = self;
 
 		/* Prepare for input events. */
 		ev_init_input_handler(&input, self);
@@ -135,10 +184,17 @@ void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler)
 - (void) close
 {
 	assert(fd >= 0);
+	assert(n < ctab_size);
+	assert(ctab[n] == conn);
 
+	/* Unregister the connection. */
+	ctab[fd] = nil;
+
+	/* Stop input events. */
 	[self stopInput];
 	[self stopOutput];
 
+	/* Close the socket. */
 	close(fd);
 	fd = -1;
 }
@@ -733,5 +789,15 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 }
 
 @end
+
+/* }}} */
+
+/* {{{ Initialization. ********************************************/
+
+void
+net_io_init(void)
+{
+	ctab_init();
+}
 
 /* }}} */

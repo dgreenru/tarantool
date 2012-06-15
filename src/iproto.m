@@ -37,80 +37,6 @@
 
 const uint32_t msg_ping = 0xff00;
 
-/* {{{ Connection Table. ******************************************/
-
-#define CTAB_INIT_SIZE 1024
-
-static IProtoConnection **ctab;
-static int ctab_size;
-
-/**
- * Initialize the table.
- */
-static void
-ctab_init(void)
-{
-	ctab = malloc(CTAB_INIT_SIZE * sizeof(IProtoConnection *));
-	if (ctab == NULL) {
-		abort();
-	}
-	while (ctab_size < CTAB_INIT_SIZE) {
-		ctab[ctab_size++] = nil;
-	}
-}
-
-/**
- * Register a connection.
- */
-static void
-ctab_register(IProtoConnection *conn)
-{
-	int n = [conn fd];
-	assert(n >= 0);
-
-	if (n >= ctab_size) {
-		int sz = ctab_size;
-		do {
-			sz *= 2;
-		} while (n >= sz);
-
-		ctab = realloc(ctab, sz * sizeof(IProtoConnection *));
-		if (ctab == NULL) {
-			abort();
-		}
-
-		while (ctab_size < sz) {
-			ctab[ctab_size++] = nil;
-		}
-	}
-
-	assert(ctab[n] == nil);
-	ctab[n] = conn;
-}
-
-/**
- * Unregister a connection.
- */
-static void
-ctab_unregister(IProtoConnection *conn)
-{
-	int n = [conn fd];
-	assert(n >= 0);
-	assert(n < ctab_size);
-	assert(ctab[n] == conn);
-	ctab[n] = nil;
-}
-
-void
-ctab_close(IProtoConnection *conn)
-{
-	ctab_unregister(conn);
-	[conn close];
-	[conn free];
-}
-
-/* }}} */
-
 /* {{{ IProto Fiber Helper. ***************************************/
 
 @interface IProtoFiberHelper: Object <FiberPeer> {
@@ -539,7 +465,8 @@ batch_process(void)
 		@catch (SocketError *e) {
 			iov_reset();
 			[conn detachWorker];
-			ctab_close(conn);
+			[conn close];
+			[conn free];
 			[e log];
 		}
 	}
@@ -626,14 +553,7 @@ batch_create(void)
 
 - (void) onConnect: (ServiceConnection *)conn
 {
-	@try {
-		ctab_register((IProtoConnection *)conn);
-		[conn startInput];
-	}
-	@catch (id) {
-		[conn close];
-		[conn free];
-	}
+	[conn startInput];
 }
 
 - (void) process: (struct batch *)batch
@@ -760,7 +680,6 @@ batch_create(void)
 void
 iproto_init(void)
 {
-	ctab_init();
 	pool_init();
 	inbuf_init();
 	batch_init();
