@@ -445,9 +445,14 @@ conn_info(struct tbuf *out)
 	[self coWork];
 }
 
+- (const char *) name
+{
+	return name;
+}
+
 - (const char *) peer
 {
-	return NULL;
+	return peer;
 }
 
 - (u64) cookie
@@ -715,16 +720,6 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	memcpy(&cookie, &addr, MIN(sizeof(addr), sizeof(cookie)));
 }
 
-- (const char *) name
-{
-	return name;
-}
-
-- (const char *) peer
-{
-	return peer;
-}
-
 - (u64) cookie
 {
 	return cookie;
@@ -800,7 +795,7 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 void
 net_io_init(void)
 {
-	ctab_init();
+	conn_init();
 }
 
 /* }}} */

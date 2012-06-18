@@ -88,6 +88,9 @@ struct service_config
 	int fd;
 	struct ev_io input;
 	struct ev_io output;
+
+	char name[SERVICE_NAME_MAXLEN];
+	char peer[SERVICE_NAME_MAXLEN];
 }
 
 - (id) init: (int)fd_;
@@ -183,14 +186,11 @@ struct service_config
 @public
 	Service *service;
 @protected
-	char name[SERVICE_NAME_MAXLEN];
-	char peer[SERVICE_NAME_MAXLEN];
 	u64 cookie;
 }
 
 - (id) init: (Service *)service_ :(int)fd_;
 - (void) initPeer: (struct sockaddr_in *)addr;
-- (const char *) name;
 
 - (void) startWorker: (struct fiber *) worker_;
 - (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
