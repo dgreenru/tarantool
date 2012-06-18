@@ -87,8 +87,6 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 	struct batch *batch;
 }
 
-- (int) fd;
-
 @end
 
 

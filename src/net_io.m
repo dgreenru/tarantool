@@ -110,48 +110,60 @@ void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler)
 
 /* {{{ Generic Network Connection. ********************************/
 
-#define CTAB_INIT_SIZE 1024
+#define CTAB_DEF_SIZE 1024
 
-static Connection **ctab;
-static int ctab_size;
+static Connection **ctab = NULL;
+static int ctab_size = 0;
+
+/**
+ * Reserve space for the connection table.
+ */
+static void
+conn_reserve(int size)
+{
+	ctab = realloc(ctab, size * sizeof(Connection *));
+	if (ctab == NULL)
+		abort();
+
+	while (ctab_size < size) {
+		ctab[ctab_size++] = nil;
+	}
+
+	say_info("connection table size: %d", ctab_size);
+}
 
 /**
  * Initialize the connection table.
  */
 static void
-ctab_init(void)
+conn_init(void)
 {
-	ctab = malloc(CTAB_INIT_SIZE * sizeof(Connection *));
-	if (ctab == NULL) {
-		abort();
-	}
-	while (ctab_size < CTAB_INIT_SIZE) {
-		ctab[ctab_size++] = nil;
-	}
+	int size = sysconf(_SC_OPEN_MAX);
+	conn_reserve(size > 0 ? size : CTAB_DEF_SIZE);
 }
 
 /**
  * Ensure the connection table size.
  */
 static void
-ctab_ensure_size(int n)
+conn_ensure_size(int n)
 {
 	if (n >= ctab_size) {
-		int sz = ctab_size;
+		int size = ctab_size;
 		do {
-			sz *= 2;
-		} while (n >= sz);
-
-		ctab = realloc(ctab, sz * sizeof(Connection *));
-		if (ctab == NULL) {
-			abort();
-		}
-
-		while (ctab_size < sz) {
-			ctab[ctab_size++] = nil;
-		}
+			size *= 2;
+		} while (n >= size);
+		conn_reserve(size);
 	}
+}
 
+void
+conn_info(struct tbuf *out)
+{
+	tbuf_printf(out, "open connections:" CRLF);
+	for (int i = 0; i < ctab_size; i++) {
+		tbuf_printf(out, "    peer: %s" CRLF, fiber_peer_name(fiber));
+	}
 }
 
 @implementation Connection
@@ -159,6 +171,7 @@ ctab_ensure_size(int n)
 - (id) init: (int)fd_
 {
 	assert(fd_ >= 0);
+	conn_ensure_size(fd_);
 
 	self = [super init];
 	if (self) {
@@ -166,7 +179,6 @@ ctab_ensure_size(int n)
 		fd = fd_;
 
 		/* Register the connection. */
-		ctab_ensure_size(fd);
 		assert(ctab[fd] == nil);
 		ctab[fd] = self;
 
@@ -184,8 +196,8 @@ ctab_ensure_size(int n)
 - (void) close
 {
 	assert(fd >= 0);
-	assert(n < ctab_size);
-	assert(ctab[n] == conn);
+	assert(fd < ctab_size);
+	assert(ctab[fd] == self);
 
 	/* Unregister the connection. */
 	ctab[fd] = nil;
@@ -680,10 +692,9 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 {
 	assert(fd_ >= 0);
 
-	self = [super init];
+	self = [super init: fd_];
 	if (self) {
 		service = service_;
-		fd = fd_;
 
 		/* Set connection name. */
 		snprintf(name, sizeof(name), "%i/handler", [service port]);
@@ -694,14 +705,6 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 
 		/* Set default cookie. */
 		cookie = 0;
-
-		/* Prepare for input events. */
-		ev_init_input_handler(&input, self);
-		ev_io_set(&input, fd, EV_READ);
-
-		/* Prepare for output events. */
-		ev_init_output_handler(&output, self);
-		ev_io_set(&output, fd, EV_WRITE);
 	}
 	return self;
 }

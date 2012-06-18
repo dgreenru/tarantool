@@ -630,11 +630,6 @@ batch_create(void)
 	[super close];
 }
 
-- (int) fd
-{
-	return fd;
-}
-
 - (void) attachWorker: (struct fiber *)worker_
 {
 	assert(worker == NULL);
