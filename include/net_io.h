@@ -69,7 +69,10 @@ void ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler);
 void ev_init_preio_handler(ev_check *watcher, id<PreIOHandler> handler);
 void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler);
 
-void net_io_init(void);
+/** Read ahead size. */
+extern int net_io_readahead;
+
+void net_io_init(int readahead);
 void net_io_info(struct tbuf *out);
 
 struct service_config
@@ -79,7 +82,6 @@ struct service_config
 	int listen_backlog;
 	bool bind_retry;
 	ev_tstamp bind_delay;
-	int readahead;
 };
 
 
@@ -129,13 +131,13 @@ struct service_config
 - (void) coWork;
 
 /* Co-operative I/O */
-- (void) coRead: (void *)buf :(size_t)count;
-- (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count;
+- (size_t) coRead: (void *)buf :(size_t)count;
+- (size_t) coRead: (void *)buf :(size_t)min_count :(size_t)max_count;
 - (void) coWrite: (void *)buf :(size_t)count;
 - (void) coWriteV: (struct iovec *)iov :(int)iovcnt;
 
-- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
-- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count :(size_t)readahead;
+- (size_t) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
+- (size_t) coReadAhead: (struct tbuf *)buf :(size_t)min_count :(size_t)readahead;
 
 @end
 
@@ -174,7 +176,6 @@ struct service_config
 /* Entry points. */
 - (id) init: (const char *)name :(struct service_config *)config;
 - (const char *) name;
-- (int) readahead;
 
 /* Extension points. */
 - (ServiceConnection *) allocConnection;
@@ -197,7 +198,6 @@ struct service_config
 - (void) initPeer: (struct sockaddr_in *)addr;
 
 - (void) startWorker: (struct fiber *) worker_;
-- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count;
 
 @end
 

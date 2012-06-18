@@ -36,6 +36,8 @@
 
 #define DEFAULT_PEER "unknown"
 
+int net_io_readahead;
+
 /* {{{ Event Handlers. ********************************************/
 
 static void
@@ -316,13 +318,22 @@ conn_ensure_size(int n)
 	fiber_call(worker);
 }
 
-- (void) coRead: (void *)buf :(size_t)count
+- (size_t) coRead: (void *)buf :(size_t)count
 {
 	[self startInput];
 	@try {
+		size_t total = 0;
 		for (;;) {
 			/* Read as much data as possible. */
 			size_t n = [self read: buf :count];
+			if (n == EOF) {
+				if (total == 0) {
+					return EOF;
+				}
+				break;
+			}
+
+			total += n;
 			if (n == count) {
 				break;
 			}
@@ -335,13 +346,15 @@ conn_ensure_size(int n)
 			fiber_yield();
 			fiber_testcancel();
 		}
+
+		return total;
 	}
 	@finally {
 		[self stopInput];
 	}
 }
 
-- (int) coRead: (void *)buf :(size_t)min_count :(size_t)max_count
+- (size_t) coRead: (void *)buf :(size_t)min_count :(size_t)max_count
 {
 	assert(min_count <= max_count);
 	[self startInput];
@@ -350,7 +363,15 @@ conn_ensure_size(int n)
 		for (;;) {
 			/* Read as much data as possible. */
 			size_t n = [self read: buf :max_count];
-			if ((total += n) >= min_count) {
+			if (n == EOF) {
+				if (total == 0) {
+					return EOF;
+				}
+				break;
+			}
+
+			total += n;
+			if (total >= min_count) {
 				break;
 			}
 
@@ -419,16 +440,20 @@ conn_ensure_size(int n)
 	}
 }
 
-- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count
+- (size_t) coReadAhead: (struct tbuf *)buf :(size_t)min_count
 {
-	[self coReadAhead: buf :min_count :(16 * 1024)];
+	return [self coReadAhead: buf :min_count :net_io_readahead];
 }
 
-- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count :(size_t)readahead
+- (size_t) coReadAhead: (struct tbuf *)buf :(size_t)min_count :(size_t)readahead
 {
 	size_t max_count = MAX(min_count, readahead);
 	tbuf_ensure(buf, max_count);
-	buf->size += [self coRead: buf->data + buf->size :min_count :max_count];
+	size_t read = [self coRead: buf->data + buf->size :min_count :max_count];
+	if (read != EOF) {
+		buf->size += read;
+	}
+	return read;
 }
 
 - (void) onInput
@@ -647,11 +672,6 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	return service_name;
 }
 
-- (int) readahead
-{
-	return service_config.readahead;
-}
-
 - (void) onBind
 {
 	/* No-op by default, override in a derived class if needed. */
@@ -729,11 +749,6 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	[self coWork];
 }
 
-- (void) coReadAhead: (struct tbuf *)buf :(size_t)min_count
-{
-	[super coReadAhead: buf :min_count :[service readahead]];
-}
-
 @end
 
 /* }}} */
@@ -789,8 +804,9 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 /* {{{ Initialization. ********************************************/
 
 void
-net_io_init(void)
+net_io_init(int readahead)
 {
+	net_io_readahead = readahead;
 	conn_init();
 }
 

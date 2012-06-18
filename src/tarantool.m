@@ -490,7 +490,6 @@ tarantool_config_service(struct service_config *config, int port)
 	config->listen_backlog = cfg.backlog;
 	config->bind_retry = true;
 	config->bind_delay = 0.1;
-	config->readahead = cfg.readahead;
 	return 0;
 }
 
@@ -743,7 +742,7 @@ main(int argc, char **argv)
 	signal_init();
 
 	tarantool_L = tarantool_lua_init();
-	net_io_init();
+	net_io_init(cfg.readahead);
 	iproto_init();
 	mod_init();
 	tarantool_lua_load_cfg(tarantool_L, &cfg);

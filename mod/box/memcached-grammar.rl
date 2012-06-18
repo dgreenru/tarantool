@@ -251,7 +251,10 @@ memcached_dispatch(ServiceConnection *conn)
 		action read_data {
 			size_t parsed = p - (u8 *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
-				[conn coReadAhead: fiber->rbuf :(bytes + 2 - (pe - p))];
+				if ([conn coReadAhead: fiber->rbuf
+						     :(bytes + 2 - (pe - p))] == EOF) {
+					return 0;
+				}
 			}
 
 			p = fiber->rbuf->data + parsed;

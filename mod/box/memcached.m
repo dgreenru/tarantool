@@ -322,7 +322,8 @@ memcached_loop(ServiceConnection *conn)
 
 	for (;;) {
 		batch_count = 0;
-		[conn coReadAhead: fiber->rbuf :1];
+		if ([conn coReadAhead: fiber->rbuf :1] == EOF)
+			break;
 
 	dispatch:
 		p = memcached_dispatch(conn);

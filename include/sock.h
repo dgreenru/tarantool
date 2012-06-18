@@ -35,9 +35,6 @@
 @interface SocketError: SystemError
 @end
 
-@interface SocketEOF: SocketError
-@end
-
 int sock_create(void);
 
 void sock_set_blocking(int fd, bool blocking);

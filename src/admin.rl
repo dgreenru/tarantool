@@ -126,7 +126,7 @@ tarantool_info(struct tbuf *out)
 	tbuf_printf(out, "  config: \"%s\"" CRLF, path);
 }
 
-static void
+static int
 admin_dispatch(ServiceConnection *conn, lua_State *L)
 {
 	struct tbuf *out = tbuf_alloc(fiber->gc_pool);
@@ -137,7 +137,9 @@ admin_dispatch(ServiceConnection *conn, lua_State *L)
 	bool state;
 
 	while ((pe = memchr(fiber->rbuf->data, '\n', fiber->rbuf->size)) == NULL) {
-		[conn coReadAhead: fiber->rbuf :1];
+		if ([conn coReadAhead: fiber->rbuf :1] == EOF) {
+			return EOF;
+		}
 	}
 
 	pe++;
@@ -242,7 +244,7 @@ admin_dispatch(ServiceConnection *conn, lua_State *L)
 		state = state_on | state_off;
 
 		commands = (help			%help						|
-			    exit			%{return;}					|
+			    exit			%{return -1;}					|
 			    lua  " "+ string		%lua						|
 			    show " "+ info		%{start(out); tarantool_info(out); end(out);}	|
 			    show " "+ fiber		%{start(out); fiber_info(out); end(out);}	|
@@ -272,6 +274,7 @@ admin_dispatch(ServiceConnection *conn, lua_State *L)
 	}
 
 	[conn coWrite: out->data :out->size];
+	return 0;
 }
 
 /* {{{ Admin Service. *********************************************/
@@ -287,12 +290,10 @@ admin_handler(ServiceConnection *conn)
 	fiber_setcancelstate(true);
 	@try {
 		for (;;) {
-			admin_dispatch(conn, L);
+			if (admin_dispatch(conn, L) < 0)
+				return;
 			fiber_gc();
 		}
-	}
-	@catch (SocketEOF *eof) {
-		(void) eof;
 	}
 	@finally {
 		luaL_unref(tarantool_L, LUA_REGISTRYINDEX, coro_ref);

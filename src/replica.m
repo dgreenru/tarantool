@@ -47,27 +47,21 @@ close_connection()
 }
 
 static struct tbuf *
-remote_row_reader_v11(CoConnection *conn)
+remote_row_reader_v11()
 {
-	@try {
-		ssize_t to_read = sizeof(struct header_v11) - fiber->rbuf->size;
-		if (to_read > 0) {
-			[conn coReadAhead: fiber->rbuf :to_read];
-		}
-
-		ssize_t request_len = header_v11(fiber->rbuf)->len + sizeof(struct header_v11);
-		to_read = request_len - fiber->rbuf->size;
-		if (to_read > 0) {
-			[conn coReadAhead: fiber->rbuf :to_read];
-		}
-
-		say_warn("read row bytes:%" PRI_SSZ, request_len);
-		return tbuf_split(fiber->rbuf, request_len);
+	ssize_t to_read = sizeof(struct header_v11) - fiber->rbuf->size;
+	if (to_read > 0 && [conn coReadAhead: fiber->rbuf :to_read] == EOF) {
+		return NULL;
 	}
-	@catch (SocketEOF *) {
-		say_error("unexpected eof reading row header");
-		@throw;
+
+	ssize_t request_len = header_v11(fiber->rbuf)->len + sizeof(struct header_v11);
+	to_read = request_len - fiber->rbuf->size;
+	if (to_read > 0 && [conn coReadAhead: fiber->rbuf :to_read] == EOF) {
+		return NULL;
 	}
+
+	say_warn("read row bytes:%" PRI_SSZ, request_len);
+	return tbuf_split(fiber->rbuf, request_len);
 }
 
 static struct tbuf *
@@ -89,7 +83,9 @@ remote_read_row(struct sockaddr_in *remote_addr, i64 initial_lsn)
 
 				u32 version;
 				err = "can't read version";
-				[conn coRead: &version :sizeof(version)];
+				if ([conn coRead: &version :sizeof(version)] == EOF) {
+					goto err;
+				}
 				if (version != default_version) {
 					err = "remote version mismatch";
 					goto err;
@@ -101,7 +97,11 @@ remote_read_row(struct sockaddr_in *remote_addr, i64 initial_lsn)
 			}
 
 			err = "can't read row";
-			return remote_row_reader_v11(conn);
+			struct tbuf *row = remote_row_reader_v11();
+			if (row != NULL) {
+				return row;
+			}
+			say_error("unexpected eof reading row header");
 		}
 		@catch (SocketError *e) {
 			[e log];

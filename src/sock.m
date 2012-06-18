@@ -44,15 +44,6 @@
 @implementation SocketError
 @end
 
-@implementation SocketEOF
-
-- (void) log
-{
-	say_debug("Socket is closed.");
-}
-
-@end
-
 /**
  * Get socket option name.
  */
@@ -239,7 +230,7 @@ sock_read(int fd, void *buf, size_t count)
 	while (count > 0) {
 		ssize_t n = read(fd, buf, count);
 		if (n == 0) {
-			@throw [SocketEOF new];
+			return EOF;
 		} else if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				break;

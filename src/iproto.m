@@ -143,6 +143,13 @@ pool_drop_worker(struct fiber *worker)
 
 /* {{{ Input Buffer. **********************************************/
 
+enum inbuf_state {
+	INBUF_PARTIAL,
+	INBUF_COMPLETE,
+	INBUF_OVERFLOW,
+	INBUF_INVALID,
+};
+
 struct inbuf
 {
 	SLIST_ENTRY(inbuf) next;
@@ -281,22 +288,19 @@ inbuf_reset(struct inbuf *inbuf)
 }
 
 /**
- * Check to see if there is no space left in the buffer.
+ * Check the state of the buffer.
  */
-static inline bool
-inbuf_is_full(struct inbuf *inbuf)
-{
-	return (inbuf->start + inbuf->count) == inbuf->size;
-}
-
-static inline bool
-inbuf_has_msg(struct inbuf *inbuf)
+static inline enum inbuf_state
+inbuf_check_state(struct inbuf *inbuf)
 {
 	/* Check if the message header is complete. */
-	if (inbuf->count < sizeof(struct iproto_header))
-		return false;
+	if (inbuf->count < sizeof(struct iproto_header)) {
+		if ((inbuf->start + inbuf->count) == inbuf->size)
+			return INBUF_OVERFLOW;
+		return INBUF_PARTIAL;
+	}
 
-	/* Get a header pointer. */
+	/* Get a pointer to the header. */
 	struct iproto_header *hdr =
 		(struct iproto_header *) (inbuf->data + inbuf->start);
 
@@ -306,14 +310,17 @@ inbuf_has_msg(struct inbuf *inbuf)
 		   for now to avoid a possible DoS attack. */
 		say_error("received package is too big: %llu",
 			  (unsigned long long)hdr->len);
-		@throw [SocketEOF new];
+		return INBUF_INVALID;
 	}
 
 	/* Check if the whole message is complete. */
-	if (inbuf->count < (sizeof(struct iproto_header) + hdr->len))
-		return false;
+	if (inbuf->count < (sizeof(struct iproto_header) + hdr->len)) {
+		if ((inbuf->start + inbuf->count) == inbuf->size)
+			return INBUF_OVERFLOW;
+		return INBUF_PARTIAL;
+	}
 
-	return true;
+	return INBUF_COMPLETE;
 }
 
 static struct inbuf *
@@ -371,6 +378,7 @@ struct batch
 	IProtoConnection *conn;
 	TAILQ_ENTRY(batch) link;
 
+	unsigned closed : 1;
 	unsigned running : 1; 
 	unsigned pending_input : 1;
 };
@@ -381,23 +389,47 @@ static TAILQ_HEAD(, batch) batch_running;
 /* Post I/O event. */
 struct ev_prepare batch_postio;
 
+static void
+batch_free(struct batch *batch)
+{
+	if (batch->inbuf != NULL) {
+		inbuf_drop(batch->inbuf);
+	}
+	free(batch);
+}
+
 static bool
 batch_input(struct batch *batch)
 {
 	struct inbuf *inbuf = batch->inbuf; 
-
-again:
-	if (inbuf_has_msg(inbuf)) {
-		return true;
+	if (inbuf == NULL) {
+		inbuf = batch->inbuf = inbuf_take(net_io_readahead);
+		if (inbuf == NULL) {
+			/* TODO: handle out of mem properly --
+			   raise a client error. */
+			batch->closed = 1;
+			return false;
+		}
 	}
 
-	if (inbuf_is_full(inbuf)) {
+again:
+	switch (inbuf_check_state(inbuf)) {
+	case INBUF_PARTIAL:
+		break;
+	case INBUF_COMPLETE:
+		return true;
+	case INBUF_OVERFLOW:
 		batch->pending_input = 1;
 		if (inbuf_fit_msg(inbuf) == NULL) {
 			/* TODO: handle out of mem properly --
 			   raise client error. */
-			@throw [SocketEOF new];
+			batch->closed = 1;
+			return false;
 		}
+		break;
+	case INBUF_INVALID:
+		batch->closed = 1;
+		return false;
 	}
 
 	if (batch->pending_input) {
@@ -408,8 +440,10 @@ again:
 
 		/* Read trying to fill all the area. */
 		size_t n = [batch->conn read: inbuf->data + used :inbuf->size - used];
-		inbuf->count += n;
-		if (n > 0) {
+		if (n == EOF) {
+			batch->closed = 1;
+		} else if (n > 0) {
+			inbuf->count += n;
 			goto again;
 		}
 	}
@@ -434,42 +468,39 @@ batch_process(void)
 			[conn attachWorker: fiber];
 			[conn stopInput];
 
-			if (batch->inbuf == NULL) {
-				batch->inbuf = inbuf_take([serv readahead]);
-				if (batch->inbuf == NULL) {
-					/* TODO: handle out of mem properly --
-					   raise a client error. */
-					return;
-				}
-			}
-
 			int count = 0;
 			while (batch_input(batch)) {
 				[serv process: batch];
 				count++;
 			}
 
-			iov_write(conn);
-			fiber_gc();
-
 			fprintf(stderr, "batch: %d\n", count);
 
-			if (batch->inbuf->count == 0) {
-				inbuf_drop(batch->inbuf);
-				batch->inbuf = NULL;
+			if (!batch->closed) {
+				if (batch->inbuf->count == 0) {
+					inbuf_drop(batch->inbuf);
+					batch->inbuf = NULL;
+				}
+				iov_write(conn);
 			}
-
-			[conn detachWorker];
-			[conn startInput];
 		}
 		@catch (SocketError *e) {
-			iov_reset();
-			[conn detachWorker];
-			[conn close];
-			[conn free];
+			batch->closed = 1;
 			[e log];
 		}
+
+		[conn detachWorker];
+		if (!batch->closed) {
+			[conn startInput];
+		} else {
+			iov_reset();
+			[conn close];
+			[conn free];
+		}
+
+		fiber_gc();
 	}
+
 	pool_drop_worker(fiber);
 }
 
@@ -625,7 +656,7 @@ batch_create(void)
 		if (batch->running) {
 			TAILQ_REMOVE(&batch_running, batch, link);
 		}
-		free(batch);
+		batch_free(batch);
 	}
 	[super close];
 }
