@@ -18,6 +18,7 @@ available commands:
  - show configuration
  - show slab
  - show palloc
+ - show net
  - show stat
  - save coredump
  - save snapshot
