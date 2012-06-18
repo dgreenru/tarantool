@@ -58,6 +58,7 @@ static const char *help =
 	" - show configuration" CRLF
 	" - show slab" CRLF
 	" - show palloc" CRLF
+	" - show net" CRLF
 	" - show stat" CRLF
 	" - save coredump" CRLF
 	" - save snapshot" CRLF
@@ -219,6 +220,7 @@ admin_dispatch(ServiceConnection *conn, lua_State *L)
 		slab = "sl"("a"("b")?)?;
 		mod = "mo"("d")?;
 		palloc = "pa"("l"("l"("o"("c")?)?)?)?;
+		net = "ne"("t")?;
 		stat = "st"("a"("t")?)?;
 
 		help = "h"("e"("l"("p")?)?)?;
@@ -247,6 +249,7 @@ admin_dispatch(ServiceConnection *conn, lua_State *L)
 			    show " "+ configuration 	%show_configuration				|
 			    show " "+ slab		%{start(out); slab_stat(out); end(out);}	|
 			    show " "+ palloc		%{start(out); palloc_stat(out); end(out);}	|
+			    show " "+ net		%{start(out); net_io_info(out);end(out);}	|
 			    show " "+ stat		%{start(out); stat_print(out);end(out);}	|
 			    show " "+ injections	%show_injections                                |
 			    set " "+ injection " "+ name " "+ state	%set_injection                  |

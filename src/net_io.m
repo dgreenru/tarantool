@@ -157,15 +157,6 @@ conn_ensure_size(int n)
 	}
 }
 
-void
-conn_info(struct tbuf *out)
-{
-	tbuf_printf(out, "open connections:" CRLF);
-	for (int i = 0; i < ctab_size; i++) {
-		tbuf_printf(out, "    peer: %s" CRLF, fiber_peer_name(fiber));
-	}
-}
-
 @implementation Connection
 
 - (id) init: (int)fd_
@@ -209,6 +200,11 @@ conn_info(struct tbuf *out)
 	/* Close the socket. */
 	close(fd);
 	fd = -1;
+}
+
+- (void) info: (struct tbuf *)buf
+{
+	tbuf_printf(buf, "    sock: %d, name: %s, peer: %s" CRLF, fd, name, peer);
 }
 
 - (void) startInput
@@ -796,6 +792,15 @@ void
 net_io_init(void)
 {
 	conn_init();
+}
+
+void
+net_io_info(struct tbuf *out)
+{
+	tbuf_printf(out, "open connections:" CRLF);
+	for (int i = 0; i < ctab_size; i++) {
+		[ctab[i] info: out];
+	}
 }
 
 /* }}} */

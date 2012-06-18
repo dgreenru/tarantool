@@ -39,6 +39,7 @@
 #define SERVICE_NAME_MAXLEN 32
 
 
+struct tbuf;
 @class ServiceConnection;
 
 
@@ -69,6 +70,7 @@ void ev_init_preio_handler(ev_check *watcher, id<PreIOHandler> handler);
 void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler);
 
 void net_io_init(void);
+void net_io_info(struct tbuf *out);
 
 struct service_config
 {
@@ -95,6 +97,8 @@ struct service_config
 
 - (id) init: (int)fd_;
 - (void) close;
+
+- (void) info: (struct tbuf *)buf;
 
 /* Event control */
 - (void) startInput;
