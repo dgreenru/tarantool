@@ -31,7 +31,6 @@
 #include <util.h>
 #include <objc/Object.h>
 
-@class IProtoConnection;
 struct vbuf;
 struct tuple;
 struct lua_State;
@@ -47,10 +46,10 @@ struct lua_State;
 @end
 
 @interface PortIproto: Port {
-	IProtoConnection *conn;
+	struct vbuf *wbuf;
 }
 + (PortIproto *) alloc;
-- (PortIproto *) init: (IProtoConnection *)conn;
+- (PortIproto *) init: (struct vbuf *)buf;
 @end
 
 /**

@@ -71,7 +71,7 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 }
 
 /* Extension point. */
-- (void) process: (IProtoConnection *)conn
+- (void) process: (struct vbuf *)wbuf
 		:(uint32_t)msg_code
 		:(struct tbuf *)request;
 
@@ -84,8 +84,6 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 @interface IProtoConnection: ServiceConnection {
 @public
 	struct batch *batch;
-	struct palloc_pool *pool;
-	struct vbuf wbuf;
 }
 
 @end

@@ -377,6 +377,8 @@ struct batch
 {
 	struct inbuf *inbuf;
 	IProtoConnection *conn;
+	struct palloc_pool *pool;
+	struct vbuf outbuf;
 	TAILQ_ENTRY(batch) link;
 
 	unsigned closed : 1;
@@ -389,15 +391,6 @@ static TAILQ_HEAD(, batch) batch_running;
 
 /* Post I/O event. */
 struct ev_prepare batch_postio;
-
-static void
-batch_free(struct batch *batch)
-{
-	if (batch->inbuf != NULL) {
-		inbuf_drop(batch->inbuf);
-	}
-	free(batch);
-}
 
 static bool
 batch_input(struct batch *batch)
@@ -463,21 +456,18 @@ batch_process_msg(struct batch *batch)
 	inbuf->start += msg_len;
 	inbuf->count -= msg_len;
 
-	IProtoConnection *conn = batch->conn;
-	struct vbuf *wbuf = &conn->wbuf;
-
 	struct iproto_header_retcode *reply =
-		palloc(wbuf->pool, sizeof(*reply));
+		palloc(batch->pool, sizeof(*reply));
 	reply->msg_code = msg->msg_code;
 	reply->sync = msg->sync;
 
 	if (unlikely(reply->msg_code == msg_ping)) {
 		reply->len = 0;
-		vbuf_add(wbuf, reply, sizeof(struct iproto_header));
+		vbuf_add(&batch->outbuf, reply, sizeof(struct iproto_header));
 	} else {
 		reply->len = sizeof(uint32_t); /* ret_code */
-		vbuf_add(wbuf, reply, sizeof(struct iproto_header_retcode));
-		size_t saved_iov_cnt = wbuf->iov_cnt;
+		vbuf_add(&batch->outbuf, reply, sizeof(struct iproto_header_retcode));
+		size_t saved_iov_cnt = batch->outbuf.iov_cnt;
 		@try {
 			/* make request point to iproto data */
 			struct tbuf request;
@@ -486,21 +476,22 @@ batch_process_msg(struct batch *batch)
 			request.data = msg->data;
 			request.pool = NULL;
 
+			IProtoConnection *conn = batch->conn;
 			IProtoService *serv = (IProtoService *) conn->service;
-			[serv process: conn :msg->msg_code :&request];
+			[serv process: &batch->outbuf :msg->msg_code :&request];
 
 			reply->ret_code = 0;
 		}
 		@catch (ClientError *e) {
 			reply->ret_code = tnt_errcode_val(e->errcode);
-			wbuf->iov->size -=
-				(wbuf->iov_cnt - saved_iov_cnt)
+			batch->outbuf.iov->size -=
+				(batch->outbuf.iov_cnt - saved_iov_cnt)
 					* sizeof(struct iovec);
-			wbuf->iov_cnt = saved_iov_cnt;
-			vbuf_dup(wbuf, e->errmsg, strlen(e->errmsg) + 1);
+			batch->outbuf.iov_cnt = saved_iov_cnt;
+			vbuf_dup(&batch->outbuf, e->errmsg, strlen(e->errmsg) + 1);
 		}
-		for (; saved_iov_cnt < wbuf->iov_cnt; saved_iov_cnt++) {
-			reply->len += iovec(wbuf)[saved_iov_cnt].iov_len;
+		for (; saved_iov_cnt < batch->outbuf.iov_cnt; saved_iov_cnt++) {
+			reply->len += iovec(&batch->outbuf)[saved_iov_cnt].iov_len;
 		}
 	}
 }
@@ -533,7 +524,7 @@ batch_process_all(void)
 					inbuf_drop(batch->inbuf);
 					batch->inbuf = NULL;
 				}
-				vbuf_flush(&conn->wbuf, conn, true);
+				vbuf_flush(&batch->outbuf, conn, true);
 			}
 		}
 		@catch (SocketError *e) {
@@ -584,13 +575,6 @@ batch_postio_dispatch(ev_watcher *watcher __attribute__((unused)),
 	fprintf(stderr, "workers taken: %d, still busy: %d\n", workers, pool_busy);
 }
 
-static void
-batch_init(void)
-{
-	ev_init(&batch_postio, (void *) batch_postio_dispatch);
-	ev_prepare_start(&batch_postio);
-}
-
 static struct batch *
 batch_create(void)
 {
@@ -598,10 +582,31 @@ batch_create(void)
 	if (unlikely(batch == NULL)) {
 		return NULL;
 	}
-
 	memset(batch, 0, sizeof(struct batch));
 
+	batch->pool = palloc_create_pool("");
+	vbuf_setup(&batch->outbuf, batch->pool);
+
 	return batch;
+}
+
+static void
+batch_destroy(struct batch *batch)
+{
+	if (batch->inbuf != NULL) {
+		inbuf_drop(batch->inbuf);
+	}
+	if (batch->pool != NULL) {
+		palloc_destroy_pool(batch->pool);
+	}
+	free(batch);
+}
+
+static void
+batch_init(void)
+{
+	ev_init(&batch_postio, (void *) batch_postio_dispatch);
+	ev_prepare_start(&batch_postio);
 }
 
 /* }}} */
@@ -623,9 +628,6 @@ batch_create(void)
 {
 	IProtoConnection *conn = [IProtoConnection alloc];
 	if (conn != nil) {
-		conn->pool = palloc_create_pool("");
-		vbuf_setup(&conn->wbuf, conn->pool);
-
 		conn->batch = batch_create();
 		if (conn->batch == NULL) {
 			[conn free];
@@ -641,11 +643,11 @@ batch_create(void)
 	[conn startInput];
 }
 
-- (void) process: (IProtoConnection *)conn
+- (void) process: (struct vbuf *)wbuf
 		:(uint32_t)msg_code
 		:(struct tbuf *)request
 {
-	(void) conn;
+	(void) wbuf;
 	(void) msg_code;
 	(void) request;
 	[self subclassResponsibility: _cmd];
@@ -665,10 +667,7 @@ batch_create(void)
 		if (batch->running) {
 			TAILQ_REMOVE(&batch_running, batch, link);
 		}
-		batch_free(batch);
-	}
-	if (pool != NULL) {
-		palloc_destroy_pool(pool);
+		batch_destroy(batch);
 	}
 	[super close];
 }

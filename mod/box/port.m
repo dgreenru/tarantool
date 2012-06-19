@@ -101,23 +101,23 @@ tuple_guard(struct vbuf *wbuf, struct tuple *tuple)
 	return obj;
 }
 
-- (PortIproto *) init: (IProtoConnection *)conn_
+- (PortIproto *) init: (struct vbuf *)wbuf_
 {
 	self = [super init];
 	if (self) {
-		conn = conn_;
+		wbuf = wbuf_;
 	}
 	return self;
 }
 
 - (void) addU32: (u32 *) p_u32
 {
-	vbuf_add(&conn->wbuf, p_u32, sizeof(u32));
+	vbuf_add(wbuf, p_u32, sizeof(u32));
 }
 
 - (void) dupU32: (u32) u32
 {
-	vbuf_dup(&conn->wbuf, &u32, sizeof(u32));
+	vbuf_dup(wbuf, &u32, sizeof(u32));
 }
 
 - (void) addTuple: (struct tuple *) tuple
@@ -125,10 +125,10 @@ tuple_guard(struct vbuf *wbuf, struct tuple *tuple)
 	size_t len = tuple_len(tuple);
 
 	if (len > BOX_REF_THRESHOLD) {
-		tuple_guard(&conn->wbuf, tuple);
-		vbuf_add(&conn->wbuf, &tuple->bsize, len);
+		tuple_guard(wbuf, tuple);
+		vbuf_add(wbuf, &tuple->bsize, len);
 	} else {
-		vbuf_dup(&conn->wbuf, &tuple->bsize, len);
+		vbuf_dup(wbuf, &tuple->bsize, len);
 	}
 }
 
@@ -276,9 +276,9 @@ add_ret(struct vbuf *wbuf, struct lua_State *L, int index)
 - (void) addLuaMultret: (struct lua_State *)L
 {
 	int nargs = lua_gettop(L);
-	vbuf_dup(&conn->wbuf, &nargs, sizeof(u32));
+	vbuf_dup(wbuf, &nargs, sizeof(u32));
 	for (int i = 1; i <= nargs; ++i)
-		add_ret(&conn->wbuf, L, i);
+		add_ret(wbuf, L, i);
 }
 
 @end

@@ -450,11 +450,11 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 	box_enter_master_or_replica_mode(&cfg);
 }
 
-- (void) process: (IProtoConnection *)conn
+- (void) process: (struct vbuf *)wbuf
 		:(uint32_t)msg_code
 		:(struct tbuf *)request
 {
-	PortIproto *port = [[PortIproto alloc] init: conn];
+	PortIproto *port = [[PortIproto alloc] init: wbuf];
 	box_process(txn_begin(), port, msg_code, request);
 }
 
@@ -469,11 +469,11 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 	return [super init: "secondary" :&config];
 }
 
-- (void) process: (IProtoConnection *)conn
+- (void) process: (struct vbuf *)wbuf
 		:(uint32_t)msg_code
 		:(struct tbuf *)request
 {
-	PortIproto *port = [[PortIproto alloc] init: conn];
+	PortIproto *port = [[PortIproto alloc] init: wbuf];
 	box_process_ro(txn_begin(), port, msg_code, request);
 }
 
