@@ -31,11 +31,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <sys/uio.h>
 #include <netinet/in.h>
 
 #include <tarantool_ev.h>
 #include <tbuf.h>
+#include <vbuf.h>
 #include <coro.h>
 #include <util.h>
 #include "third_party/queue.h"
@@ -76,10 +76,7 @@ struct fiber {
 	ev_timer timer;
 	ev_child cw;
 
-	struct tbuf *iov;
-	size_t iov_cnt;
 	struct tbuf *rbuf;
-	struct tbuf *cleanup;
 
 	SLIST_ENTRY(fiber) link, zombie_link;
 
@@ -95,14 +92,6 @@ struct fiber {
 };
 
 SLIST_HEAD(, fiber) fibers, zombie_fibers;
-
-static inline struct iovec *iovec(const struct tbuf *t)
-{
-	return (struct iovec *)t->data;
-}
-
-typedef void (*fiber_cleanup_handler) (void *);
-void fiber_register_cleanup(fiber_cleanup_handler handler, void *data);
 
 extern struct fiber *fiber;
 
@@ -121,47 +110,10 @@ void fiber_destroy_all();
 bool
 fiber_is_caller(struct fiber *f);
 
-inline static void iov_add_unsafe(const void *buf, size_t len)
-{
-	struct iovec *v;
-	assert(fiber->iov->capacity - fiber->iov->size >= sizeof(*v));
-	v = fiber->iov->data + fiber->iov->size;
-	v->iov_base = (void *)buf;
-	v->iov_len = len;
-	fiber->iov->size += sizeof(*v);
-	fiber->iov_cnt++;
-}
-
-inline static void iov_ensure(size_t count)
-{
-	tbuf_ensure(fiber->iov, sizeof(struct iovec) * count);
-}
-
-/* Add to fiber's iov vector. */
-inline static void iov_add(const void *buf, size_t len)
-{
-	iov_ensure(1);
-	iov_add_unsafe(buf, len);
-}
-
-inline static void iov_dup(const void *buf, size_t len)
-{
-	void *copy = palloc(fiber->gc_pool, len);
-	memcpy(copy, buf, len);
-	iov_add(copy, len);
-}
-
-/* Reset the fiber's iov vector. */
-void iov_reset();
-/* Write everything from the fiber's iov vector to the connection. */
-@class CoConnection;
-void iov_write(CoConnection *conn);
-
 const char *fiber_peer_name(struct fiber *fiber);
 u64 fiber_peer_cookie(struct fiber *fiber);
 
-void fiber_cleanup(void);
-void fiber_gc(void);
+bool fiber_gc(void);
 bool fiber_checkstack();
 void fiber_call(struct fiber *callee);
 void fiber_wakeup(struct fiber *f);

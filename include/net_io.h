@@ -77,7 +77,6 @@ void net_io_info(struct tbuf *out);
 
 struct service_config
 {
-	const char *name;
 	struct sockaddr_in addr;
 	int listen_backlog;
 	bool bind_retry;

@@ -23,6 +23,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
+#include "memcached.h"
 #include "tarantool.h"
 
 #include <limits.h>
@@ -173,7 +175,7 @@ static struct stats {
 } stats;
 
 static void
-print_stats()
+print_stats(MemcachedConnection *conn)
 {
 	u64 bytes_used, items;
 	struct tbuf *out = tbuf_alloc(fiber->gc_pool);
@@ -200,16 +202,18 @@ print_stats()
 	tbuf_printf(out, "STAT limit_maxbytes %"PRIu64"\r\n", (u64)(cfg.slab_alloc_arena * (1 << 30)));
 	tbuf_printf(out, "STAT threads 1\r\n");
 	tbuf_printf(out, "END\r\n");
-	iov_add(out->data, out->size);
+	vbuf_add(conn->wbuf, out->data, out->size);
 }
 
-void memcached_get(size_t keys_count, struct tbuf *keys,
-		   bool show_cas)
+void
+memcached_get(MemcachedConnection *conn,
+	      size_t keys_count, struct tbuf *keys,
+	      bool show_cas)
 {
 	stat_collect(stat_base, MEMC_GET, 1);
 	stats.cmd_get++;
 	say_debug("ensuring space for %"PRI_SZ" keys", keys_count);
-	iov_ensure(keys_count * 5 + 1);
+	vbuf_ensure(conn->wbuf, keys_count * 5 + 1);
 	while (keys_count-- > 0) {
 		struct tuple *tuple;
 		struct meta *m;
@@ -259,23 +263,23 @@ void memcached_get(size_t keys_count, struct tbuf *keys,
 		stats.get_hits++;
 		stat_collect(stat_base, MEMC_GET_HIT, 1);
 
-		fiber_ref_tuple(tuple);
+		tuple_guard(conn->wbuf, tuple);
 
 		if (show_cas) {
 			struct tbuf *b = tbuf_alloc(fiber->gc_pool);
 			tbuf_printf(b, "VALUE %.*s %"PRIu32" %"PRIu32" %"PRIu64"\r\n", key_len, (u8 *)key, m->flags, value_len, m->cas);
-			iov_add_unsafe(b->data, b->size);
+			vbuf_add_unsafe(conn->wbuf, b->data, b->size);
 			stats.bytes_written += b->size;
 		} else {
-			iov_add_unsafe("VALUE ", 6);
-			iov_add_unsafe(key, key_len);
-			iov_add_unsafe(suffix, suffix_len);
+			vbuf_add_unsafe(conn->wbuf, "VALUE ", 6);
+			vbuf_add_unsafe(conn->wbuf, key, key_len);
+			vbuf_add_unsafe(conn->wbuf, suffix, suffix_len);
 		}
-		iov_add_unsafe(value, value_len);
-		iov_add_unsafe("\r\n", 2);
+		vbuf_add_unsafe(conn->wbuf, value, value_len);
+		vbuf_add_unsafe(conn->wbuf, "\r\n", 2);
 		stats.bytes_written += value_len + 2;
 	}
-	iov_add_unsafe("END\r\n", 5);
+	vbuf_add_unsafe(conn->wbuf, "END\r\n", 5);
 	stats.bytes_written += 5;
 }
 
@@ -297,17 +301,18 @@ flush_all(void *data)
 do {										\
 	stats.cmd_set++;							\
 	if (bytes > (1<<20)) {							\
-		iov_add("SERVER_ERROR object too large for cache\r\n", 41);	\
+		vbuf_add(conn->wbuf,						\
+			 "SERVER_ERROR object too large for cache\r\n", 41);	\
 	} else {								\
 		@try {								\
 			store(key, exptime, flags, bytes, data);		\
 			stats.total_items++;					\
-			iov_add("STORED\r\n", 8);				\
+			vbuf_add(conn->wbuf, "STORED\r\n", 8);			\
 		}								\
 		@catch (ClientError *e) {					\
-			iov_add("SERVER_ERROR ", 13);				\
-			iov_add(e->errmsg, strlen(e->errmsg));			\
-			iov_add("\r\n", 2);					\
+			vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);		\
+			vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));	\
+			vbuf_add(conn->wbuf, "\r\n", 2);			\
 		}								\
 	}									\
 } while (0)
@@ -315,7 +320,7 @@ do {										\
 #include "memcached-grammar.m"
 
 void
-memcached_loop(ServiceConnection *conn)
+memcached_loop(MemcachedConnection *conn)
 {
 	int p;
 	int batch_count;
@@ -324,6 +329,11 @@ memcached_loop(ServiceConnection *conn)
 		batch_count = 0;
 		if ([conn coReadAhead: fiber->rbuf :1] == EOF)
 			break;
+
+		if (conn->wbuf == NULL) {
+			conn->wbuf = palloc(fiber->gc_pool, sizeof(struct vbuf));
+			vbuf_setup(conn->wbuf, fiber->gc_pool);
+		}
 
 	dispatch:
 		p = memcached_dispatch(conn);
@@ -342,9 +352,12 @@ memcached_loop(ServiceConnection *conn)
 				goto dispatch;
 		}
 
-		iov_write(conn);
+		vbuf_flush(conn->wbuf, conn, false);
+		if (fiber_gc()) {
+			conn->wbuf = NULL;
+		}
+
 		// TODO: stats.bytes_written += r;
-		fiber_gc();
 
 		if (p == 1 && fiber->rbuf->size > 0) {
 			batch_count = 0;
@@ -354,14 +367,14 @@ memcached_loop(ServiceConnection *conn)
 }
 
 void
-memcached_handler(ServiceConnection *conn)
+memcached_handler(MemcachedConnection *conn)
 {
 	stats.total_connections++;
 	stats.curr_connections++;
 
 	@try {
 		memcached_loop(conn);
-		iov_write(conn);
+		vbuf_flush(conn->wbuf, conn, false);
 	}
 	@catch (SocketError *e) {
 		[e log];
@@ -562,3 +575,26 @@ void memcached_stop_expire()
 	fiber_cancel(memcached_expire);
 	memcached_expire = NULL;
 }
+
+@implementation MemcachedService
+- (id) init
+{
+	struct service_config config;
+	tarantool_config_service(&config, cfg.memcached_port);
+	return [super init: "memcached" :&config
+			  :(single_worker_cb) memcached_handler];
+}
+
+- (Connection *) allocConnection
+{
+	MemcachedConnection *conn = [MemcachedConnection alloc];
+	if (conn) {
+		conn->wbuf = NULL;
+	}
+	return conn;
+}
+
+@end
+
+@implementation MemcachedConnection
+@end

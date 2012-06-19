@@ -29,8 +29,19 @@
  * SUCH DAMAGE.
  */
 
+#include <net_io.h>
+
 struct tarantool_cfg;
-@class Connection;
+
+@interface MemcachedService: SingleWorkerService {
+}
+@end
+
+@interface MemcachedConnection: ServiceConnection {
+@public
+	struct vbuf *wbuf;
+}
+@end
 
 void
 memcached_init();
@@ -46,7 +57,5 @@ memcached_check_config(struct tarantool_cfg *conf);
 
 void memcached_start_expire();
 void memcached_stop_expire();
-
-void memcached_handler(ServiceConnection *conn);
 
 #endif /* TARANTOOL_MEMCACHED_H_INCLUDED */

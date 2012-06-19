@@ -74,7 +74,7 @@ struct box_snap_row {
 
 static BoxPrimaryService *primary_service;
 static BoxSecondaryService *secondary_service;
-static SingleWorkerService *memcached_service;
+static MemcachedService *memcached_service;
 
 
 static inline struct box_snap_row *
@@ -450,9 +450,12 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 	box_enter_master_or_replica_mode(&cfg);
 }
 
-- (void) process: (uint32_t) msg_code :(struct tbuf *) request
+- (void) process: (IProtoConnection *)conn
+		:(uint32_t)msg_code
+		:(struct tbuf *)request
 {
-	box_process(txn_begin(), port_iproto, msg_code, request);
+	PortIproto *port = [[PortIproto alloc] init: conn];
+	box_process(txn_begin(), port, msg_code, request);
 }
 
 @end
@@ -466,9 +469,12 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 	return [super init: "secondary" :&config];
 }
 
-- (void) process: (uint32_t) msg_code :(struct tbuf *) request
+- (void) process: (IProtoConnection *)conn
+		:(uint32_t)msg_code
+		:(struct tbuf *)request
 {
-	box_process_ro(txn_begin(), port_iproto, msg_code, request);
+	PortIproto *port = [[PortIproto alloc] init: conn];
+	box_process_ro(txn_begin(), port, msg_code, request);
 }
 
 @end
@@ -544,10 +550,7 @@ mod_init(void)
 
 	/* run memcached server */
 	if (cfg.memcached_port != 0) {
-		memcached_service =
-			[SingleWorkerService create: "memcached"
-						   :cfg.memcached_port
-						   :memcached_handler];
+		memcached_service = [MemcachedService new];
 		[memcached_service start];
 	}
 }

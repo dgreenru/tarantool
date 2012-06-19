@@ -64,11 +64,6 @@ static struct fiber **sp, *call_stack[FIBER_CALL_STACK];
 static uint32_t last_used_fid;
 static struct palloc_pool *ex_pool;
 
-struct fiber_cleanup {
-	void (*handler) (void *data);
-	void *data;
-};
-
 static struct mh_i32ptr_t *fibers_registry;
 
 static void
@@ -323,63 +318,23 @@ fiber_alloc(struct fiber *fiber)
 {
 	prelease(fiber->gc_pool);
 	fiber->rbuf = tbuf_alloc(fiber->gc_pool);
-	fiber->iov = tbuf_alloc(fiber->gc_pool);
-	fiber->cleanup = tbuf_alloc(fiber->gc_pool);
-
-	fiber->iov_cnt = 0;
 }
 
-void
-fiber_register_cleanup(fiber_cleanup_handler handler, void *data)
-{
-	struct fiber_cleanup i;
-	i.handler = handler;
-	i.data = data;
-	tbuf_append(fiber->cleanup, &i, sizeof(struct fiber_cleanup));
-}
-
-void
-fiber_cleanup(void)
-{
-	struct fiber_cleanup *cleanup = fiber->cleanup->data;
-	int i = fiber->cleanup->size / sizeof(struct fiber_cleanup);
-
-	while (i-- > 0) {
-		cleanup->handler(cleanup->data);
-		cleanup++;
-	}
-	tbuf_reset(fiber->cleanup);
-}
-
-void
+bool
 fiber_gc(void)
 {
-	struct palloc_pool *tmp;
-
-	fiber_cleanup();
-
 	if (palloc_allocated(fiber->gc_pool) < 128 * 1024)
-		return;
+		return false;
 
-	tmp = fiber->gc_pool;
+	struct palloc_pool *tmp = fiber->gc_pool;
 	fiber->gc_pool = ex_pool;
 	ex_pool = tmp;
 	palloc_set_name(fiber->gc_pool, fiber->name);
 	palloc_set_name(ex_pool, "ex_pool");
-
 	fiber->rbuf = tbuf_clone(fiber->gc_pool, fiber->rbuf);
-	fiber->cleanup = tbuf_clone(fiber->gc_pool, fiber->cleanup);
-
-	struct tbuf *new_iov = tbuf_alloc(fiber->gc_pool);
-	for (int i = 0; i < fiber->iov_cnt; i++) {
-		struct iovec *v;
-		size_t o = tbuf_reserve(new_iov, sizeof(*v));
-		v = new_iov->data + o;
-		memcpy(v, iovec(fiber->iov) + i, sizeof(*v));
-	}
-	fiber->iov = new_iov;
 
 	prelease(ex_pool);
+	return true;
 }
 
 
@@ -517,25 +472,6 @@ u64
 fiber_peer_cookie(struct fiber *fiber)
 {
 	return fiber->peer == nil ? 0 : [fiber->peer cookie];
-}
-
-void
-iov_reset()
-{
-	fiber->iov_cnt = 0;	/* discard anything unwritten */
-	tbuf_reset(fiber->iov);
-}
-
-void
-iov_write(CoConnection *conn)
-{
-	@try {
-		struct iovec *iov = iovec(fiber->iov);
-		[conn coWriteV: iov :fiber->iov_cnt];
-	}
-	@finally {
-		iov_reset();
-	}
 }
 
 int

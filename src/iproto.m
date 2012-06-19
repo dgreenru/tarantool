@@ -33,6 +33,7 @@
 #include <palloc.h>
 #include <fiber.h>
 #include <tbuf.h>
+#include <vbuf.h>
 #include <say.h>
 
 const uint32_t msg_ping = 0xff00;
@@ -453,7 +454,59 @@ again:
 }
 
 static void
-batch_process(void)
+batch_process_msg(struct batch *batch)
+{
+	struct inbuf *inbuf = batch->inbuf;
+	struct iproto_header *msg =
+		(struct iproto_header *) (inbuf->data + inbuf->start);
+	size_t msg_len = sizeof(struct iproto_header) + msg->len;
+	inbuf->start += msg_len;
+	inbuf->count -= msg_len;
+
+	IProtoConnection *conn = batch->conn;
+	struct vbuf *wbuf = &conn->wbuf;
+
+	struct iproto_header_retcode *reply =
+		palloc(wbuf->pool, sizeof(*reply));
+	reply->msg_code = msg->msg_code;
+	reply->sync = msg->sync;
+
+	if (unlikely(reply->msg_code == msg_ping)) {
+		reply->len = 0;
+		vbuf_add(wbuf, reply, sizeof(struct iproto_header));
+	} else {
+		reply->len = sizeof(uint32_t); /* ret_code */
+		vbuf_add(wbuf, reply, sizeof(struct iproto_header_retcode));
+		size_t saved_iov_cnt = wbuf->iov_cnt;
+		@try {
+			/* make request point to iproto data */
+			struct tbuf request;
+			request.capacity = msg->len;
+			request.size = msg->len;
+			request.data = msg->data;
+			request.pool = NULL;
+
+			IProtoService *serv = (IProtoService *) conn->service;
+			[serv process: conn :msg->msg_code :&request];
+
+			reply->ret_code = 0;
+		}
+		@catch (ClientError *e) {
+			reply->ret_code = tnt_errcode_val(e->errcode);
+			wbuf->iov->size -=
+				(wbuf->iov_cnt - saved_iov_cnt)
+					* sizeof(struct iovec);
+			wbuf->iov_cnt = saved_iov_cnt;
+			vbuf_dup(wbuf, e->errmsg, strlen(e->errmsg) + 1);
+		}
+		for (; saved_iov_cnt < wbuf->iov_cnt; saved_iov_cnt++) {
+			reply->len += iovec(wbuf)[saved_iov_cnt].iov_len;
+		}
+	}
+}
+
+static void
+batch_process_all(void)
 {
 	while (!TAILQ_EMPTY(&batch_running)) {
 		struct batch *batch = TAILQ_FIRST(&batch_running);
@@ -461,7 +514,6 @@ batch_process(void)
 		batch->running = 0;
 
 		IProtoConnection *conn = batch->conn;
-		IProtoService *serv = (IProtoService *) conn->service;
 		assert(batch == conn->batch);
 
 		@try {
@@ -470,7 +522,7 @@ batch_process(void)
 
 			int count = 0;
 			while (batch_input(batch)) {
-				[serv process: batch];
+				batch_process_msg(batch);
 				count++;
 			}
 
@@ -481,7 +533,7 @@ batch_process(void)
 					inbuf_drop(batch->inbuf);
 					batch->inbuf = NULL;
 				}
-				iov_write(conn);
+				vbuf_flush(&conn->wbuf, conn, true);
 			}
 		}
 		@catch (SocketError *e) {
@@ -489,16 +541,15 @@ batch_process(void)
 			[e log];
 		}
 
+		fiber_gc();
+
 		[conn detachWorker];
 		if (!batch->closed) {
 			[conn startInput];
 		} else {
-			iov_reset();
 			[conn close];
 			[conn free];
 		}
-
-		fiber_gc();
 	}
 
 	pool_drop_worker(fiber);
@@ -511,7 +562,7 @@ static void
 batch_worker(void *dummy __attribute__((unused)))
 {
 	for (;;) {
-		batch_process();
+		batch_process_all();
 		fiber_yield();
 	}
 }
@@ -572,6 +623,9 @@ batch_create(void)
 {
 	IProtoConnection *conn = [IProtoConnection alloc];
 	if (conn != nil) {
+		conn->pool = palloc_create_pool("");
+		vbuf_setup(&conn->wbuf, conn->pool);
+
 		conn->batch = batch_create();
 		if (conn->batch == NULL) {
 			[conn free];
@@ -587,56 +641,11 @@ batch_create(void)
 	[conn startInput];
 }
 
-- (void) process: (struct batch *)batch
+- (void) process: (IProtoConnection *)conn
+		:(uint32_t)msg_code
+		:(struct tbuf *)request
 {
-	struct inbuf *inbuf = batch->inbuf;
-
-	struct iproto_header *msg =
-		(struct iproto_header *) (inbuf->data + inbuf->start);
-	size_t msg_len = sizeof(struct iproto_header) + msg->len;
-
-	inbuf->start += msg_len;
-	inbuf->count -= msg_len;
-
-	struct iproto_header_retcode *reply =
-		palloc(fiber->gc_pool, sizeof(*reply));
-	reply->msg_code = msg->msg_code;
-	reply->sync = msg->sync;
-
-	if (unlikely(reply->msg_code == msg_ping)) {
-		reply->len = 0;
-		iov_add(reply, sizeof(struct iproto_header));
-	} else {
-		reply->len = sizeof(uint32_t); /* ret_code */
-		iov_add(reply, sizeof(struct iproto_header_retcode));
-		size_t saved_iov_cnt = fiber->iov_cnt;
-		@try {
-			/* make request point to iproto data */
-			struct tbuf request;
-			request.capacity = msg->len;
-			request.size = msg->len;
-			request.data = msg->data;
-			request.pool = NULL;
-
-			[self process: msg->msg_code :&request];
-			reply->ret_code = 0;
-		}
-		@catch (ClientError *e) {
-			reply->ret_code = tnt_errcode_val(e->errcode);
-			fiber->iov->size -=
-				(fiber->iov_cnt - saved_iov_cnt)
-					* sizeof(struct iovec);
-			fiber->iov_cnt = saved_iov_cnt;
-			iov_dup(e->errmsg, strlen(e->errmsg) + 1);
-		}
-		for (; saved_iov_cnt < fiber->iov_cnt; saved_iov_cnt++) {
-			reply->len += iovec(fiber->iov)[saved_iov_cnt].iov_len;
-		}
-	}
-}
-
-- (void) process: (uint32_t) msg_code :(struct tbuf *) request
-{
+	(void) conn;
 	(void) msg_code;
 	(void) request;
 	[self subclassResponsibility: _cmd];
@@ -657,6 +666,9 @@ batch_create(void)
 			TAILQ_REMOVE(&batch_running, batch, link);
 		}
 		batch_free(batch);
+	}
+	if (pool != NULL) {
+		palloc_destroy_pool(pool);
 	}
 	[super close];
 }

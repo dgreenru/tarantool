@@ -31,32 +31,39 @@
 #include <util.h>
 #include <objc/Object.h>
 
+@class IProtoConnection;
+struct vbuf;
 struct tuple;
 struct lua_State;
 
 @interface Port: Object
-- (void) addU32: (u32 *) u32;
-- (void) dupU32: (u32) u32;
-- (void) addTuple: (struct tuple *) tuple;
-- (void) addLuaMultret: (struct lua_State *) L;
+- (void) addU32: (u32 *)u32;
+- (void) dupU32: (u32)u32;
+- (void) addTuple: (struct tuple *)tuple;
+- (void) addLuaMultret: (struct lua_State *)L;
 @end
 
 @interface PortNull: Port
 @end
 
+@interface PortIproto: Port {
+	IProtoConnection *conn;
+}
++ (PortIproto *) alloc;
+- (PortIproto *) init: (IProtoConnection *)conn;
+@end
+
 /**
- * A hack to keep tuples alive until iov_flush(fiber->iovec).
+ * A hack to keep tuples alive until vbuf is flushed.
  * Is internal to port_iproto implementation, but is also
- * used in memcached.m, which doesn't uses fiber->iovec
- * bypassing port_iproto a public declaration here.
+ * used in memcached.m bypassing PortIproto.
  */
-void fiber_ref_tuple(struct tuple *tuple);
+void tuple_guard(struct vbuf *wbuf, struct tuple *tuple);
 
 /** These do not have state currently, thus a single
  * instance is sufficient.
  */
 Port *port_null;
-Port *port_iproto;
 
 /** Init the subsystem. */
 void port_init();

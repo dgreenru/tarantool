@@ -30,7 +30,7 @@
 }%%
 
 static int __attribute__((noinline))
-memcached_dispatch(ServiceConnection *conn)
+memcached_dispatch(MemcachedConnection *conn)
 {
 	int cs;
 	u8 *p, *pe;
@@ -44,7 +44,7 @@ memcached_dispatch(ServiceConnection *conn)
 	bool noreply = false;
 	u8 *data = NULL;
 	bool done = false;
-	size_t saved_iov_cnt = fiber->iov_cnt;
+	size_t saved_iov_cnt = conn->wbuf->iov_cnt;
 	uintptr_t flush_delay = 0;
 	size_t keys_count = 0;
 
@@ -63,7 +63,7 @@ memcached_dispatch(ServiceConnection *conn)
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple != NULL && !expired(tuple))
-				iov_add("NOT_STORED\r\n", 12);
+				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			else
 				STORE;
 		}
@@ -72,7 +72,7 @@ memcached_dispatch(ServiceConnection *conn)
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || expired(tuple))
-				iov_add("NOT_STORED\r\n", 12);
+				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			else
 				STORE;
 		}
@@ -81,9 +81,9 @@ memcached_dispatch(ServiceConnection *conn)
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || expired(tuple))
-				iov_add("NOT_FOUND\r\n", 11);
+				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			else if (meta(tuple)->cas != cas)
-				iov_add("EXISTS\r\n", 8);
+				vbuf_add(conn->wbuf, "EXISTS\r\n", 8);
 			else
 				STORE;
 		}
@@ -96,7 +96,7 @@ memcached_dispatch(ServiceConnection *conn)
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST) {
-				iov_add("NOT_STORED\r\n", 12);
+				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			} else {
 				value = tuple_field(tuple, 3);
 				value_len = load_varint32(&value);
@@ -125,7 +125,7 @@ memcached_dispatch(ServiceConnection *conn)
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
-				iov_add("NOT_FOUND\r\n", 11);
+				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			} else {
 				m = meta(tuple);
 				field = tuple_field(tuple, 3);
@@ -155,16 +155,16 @@ memcached_dispatch(ServiceConnection *conn)
 					@try {
 						store(key, exptime, flags, bytes, data);
 						stats.total_items++;
-						iov_add(b->data, b->size);
-						iov_add("\r\n", 2);
+						vbuf_add(conn->wbuf, b->data, b->size);
+						vbuf_add(conn->wbuf, "\r\n", 2);
 					}
 					@catch (ClientError *e) {
-						iov_add("SERVER_ERROR ", 13);
-						iov_add(e->errmsg, strlen(e->errmsg));
-						iov_add("\r\n", 2);
+						vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
+						vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+						vbuf_add(conn->wbuf, "\r\n", 2);
 					}
 				} else {
-					iov_add("CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", 62);
+					vbuf_add(conn->wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", 62);
 				}
 			}
 
@@ -174,28 +174,28 @@ memcached_dispatch(ServiceConnection *conn)
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
-				iov_add("NOT_FOUND\r\n", 11);
+				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			} else {
 				@try {
 					delete(key);
-					iov_add("DELETED\r\n", 9);
+					vbuf_add(conn->wbuf, "DELETED\r\n", 9);
 				}
 				@catch (ClientError *e) {
-					iov_add("SERVER_ERROR ", 13);
-					iov_add(e->errmsg, strlen(e->errmsg));
-					iov_add("\r\n", 2);
+					vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
+					vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+					vbuf_add(conn->wbuf, "\r\n", 2);
 				}
 			}
 		}
 
 		action get {
 			@try {
-				memcached_get(keys_count, keys, show_cas);
+				memcached_get(conn, keys_count, keys, show_cas);
 			} @catch (ClientError *e) {
-				iov_reset();
-				iov_add("SERVER_ERROR ", 13);
-				iov_add(e->errmsg, strlen(e->errmsg));
-				iov_add("\r\n", 2);
+				vbuf_clear(conn->wbuf, false);
+				vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
+				vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+				vbuf_add(conn->wbuf, "\r\n", 2);
 			}
 		}
 
@@ -207,11 +207,11 @@ memcached_dispatch(ServiceConnection *conn)
 					fiber_call(f);
 			} else
 				flush_all((void *)0);
-			iov_add("OK\r\n", 4);
+			vbuf_add(conn->wbuf, "OK\r\n", 4);
 		}
 
 		action stats {
-			print_stats();
+			print_stats(conn);
 		}
 
 		action quit {
@@ -309,22 +309,23 @@ memcached_dispatch(ServiceConnection *conn)
 		if (pe - p > (1 << 20)) {
 		exit:
 			say_warn("memcached proto error");
-			iov_add("ERROR\r\n", 7);
+			vbuf_add(conn->wbuf, "ERROR\r\n", 7);
 			stats.bytes_written += 7;
 			return -1;
 		}
 		char *r;
 		if ((r = memmem(p, pe - p, "\r\n", 2)) != NULL) {
 			tbuf_peek(fiber->rbuf, r + 2 - (char *)fiber->rbuf->data);
-			iov_add("CLIENT_ERROR bad command line format\r\n", 38);
+			vbuf_add(conn->wbuf,
+				 "CLIENT_ERROR bad command line format\r\n", 38);
 			return 1;
 		}
 		return 0;
 	}
 
 	if (noreply) {
-		fiber->iov_cnt = saved_iov_cnt;
-		fiber->iov->size = saved_iov_cnt * sizeof(struct iovec);
+		conn->wbuf->iov_cnt = saved_iov_cnt;
+		conn->wbuf->iov->size = saved_iov_cnt * sizeof(struct iovec);
 	}
 
 	return 1;

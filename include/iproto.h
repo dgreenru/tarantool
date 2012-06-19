@@ -70,11 +70,10 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 @interface IProtoService: Service {
 }
 
-/* Entry point. */
-- (void) process: (struct batch *)batch;
-
 /* Extension point. */
-- (void) process: (uint32_t)msg_code :(struct tbuf *)request;
+- (void) process: (IProtoConnection *)conn
+		:(uint32_t)msg_code
+		:(struct tbuf *)request;
 
 @end
 
@@ -85,6 +84,8 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 @interface IProtoConnection: ServiceConnection {
 @public
 	struct batch *batch;
+	struct palloc_pool *pool;
+	struct vbuf wbuf;
 }
 
 @end

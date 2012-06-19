@@ -31,6 +31,7 @@
 #include <fiber.h>
 #include <tarantool_lua.h>
 #include "tuple.h"
+#include <vbuf.h>
 #include "box_lua.h"
 #include "lua.h"
 #include "lauxlib.h"
@@ -39,6 +40,7 @@
 #include "lj_ctype.h"
 #include "lj_cdata.h"
 #include "lj_cconv.h"
+#include <objc/runtime.h>
 
 /*
   For tuples of size below this threshold, when sending a tuple
@@ -60,48 +62,62 @@ tuple_unref(void *tuple)
 }
 
 void
-fiber_ref_tuple(struct tuple *tuple)
+tuple_guard(struct vbuf *wbuf, struct tuple *tuple)
 {
 	tuple_ref(tuple, 1);
-	fiber_register_cleanup(tuple_unref, tuple);
+	vbuf_register_cleanup(wbuf, tuple_unref, tuple);
 }
 
 @implementation Port
-- (void) addU32: (u32 *) p_u32
+- (void) addU32: (u32 *)p_u32
 {
 	[self subclassResponsibility: _cmd];
 	(void) p_u32;
 }
-- (void) dupU32: (u32) u32
+- (void) dupU32: (u32)u32
 {
 	[self subclassResponsibility: _cmd];
 	(void) u32;
 }
-- (void) addTuple: (struct tuple *) tuple
+- (void) addTuple: (struct tuple *)tuple
 {
 	[self subclassResponsibility: _cmd];
 	(void) tuple;
 }
-- (void) addLuaMultret: (struct lua_State *) L
+- (void) addLuaMultret: (struct lua_State *)L
 {
 	[self subclassResponsibility: _cmd];
 	(void) L;
 }
 @end
 
-@interface PortIproto: Port
-@end
-
 @implementation PortIproto
+
++ (PortIproto *) alloc
+{
+	size_t sz = class_getInstanceSize(self);
+	id obj = palloc(fiber->gc_pool, sz);
+	object_setClass(obj, self);
+	return obj;
+}
+
+- (PortIproto *) init: (IProtoConnection *)conn_
+{
+	self = [super init];
+	if (self) {
+		conn = conn_;
+	}
+	return self;
+}
 
 - (void) addU32: (u32 *) p_u32
 {
-	iov_add(p_u32, sizeof(u32));
+	vbuf_add(&conn->wbuf, p_u32, sizeof(u32));
 }
 
 - (void) dupU32: (u32) u32
 {
-	iov_dup(&u32, sizeof(u32));
+	vbuf_dup(&conn->wbuf, &u32, sizeof(u32));
 }
 
 - (void) addTuple: (struct tuple *) tuple
@@ -109,10 +125,10 @@ fiber_ref_tuple(struct tuple *tuple)
 	size_t len = tuple_len(tuple);
 
 	if (len > BOX_REF_THRESHOLD) {
-		fiber_ref_tuple(tuple);
-		iov_add(&tuple->bsize, len);
+		tuple_guard(&conn->wbuf, tuple);
+		vbuf_add(&conn->wbuf, &tuple->bsize, len);
 	} else {
-		iov_dup(&tuple->bsize, len);
+		vbuf_dup(&conn->wbuf, &tuple->bsize, len);
 	}
 }
 
@@ -120,7 +136,7 @@ fiber_ref_tuple(struct tuple *tuple)
  * overhead as possible. */
 
 static void
-iov_add_lua_table(struct lua_State *L, int index)
+add_lua_table(struct vbuf *wbuf, struct lua_State *L, int index)
 {
 	u32 *field_count = palloc(fiber->gc_pool, sizeof(u32));
 	u32 *tuple_len = palloc(fiber->gc_pool, sizeof(u32));
@@ -128,8 +144,8 @@ iov_add_lua_table(struct lua_State *L, int index)
 	*field_count = 0;
 	*tuple_len = 0;
 
-	iov_add(tuple_len, sizeof(u32));
-	iov_add(field_count, sizeof(u32));
+	vbuf_add(wbuf, tuple_len, sizeof(u32));
+	vbuf_add(wbuf, field_count, sizeof(u32));
 
 	u8 field_len_buf[5];
 	size_t field_len, field_len_len;
@@ -147,8 +163,8 @@ iov_add_lua_table(struct lua_State *L, int index)
 			field_len_len =
 				save_varint32(field_len_buf,
 					      field_len) - field_len_buf;
-			iov_dup(field_len_buf, field_len_len);
-			iov_dup(&field_num, field_len);
+			vbuf_dup(wbuf, field_len_buf, field_len_len);
+			vbuf_dup(wbuf, &field_num, field_len);
 			*tuple_len += field_len_len + field_len;
 			break;
 		}
@@ -159,8 +175,8 @@ iov_add_lua_table(struct lua_State *L, int index)
 			field_len_len =
 				save_varint32(field_len_buf,
 					      field_len) - field_len_buf;
-			iov_dup(field_len_buf, field_len_len);
-			iov_dup(&field_num, field_len);
+			vbuf_dup(wbuf, field_len_buf, field_len_len);
+			vbuf_dup(wbuf, &field_num, field_len);
 			*tuple_len += field_len_len + field_len;
 			break;
 		}
@@ -170,8 +186,8 @@ iov_add_lua_table(struct lua_State *L, int index)
 			field_len_len =
 				save_varint32(field_len_buf,
 					      field_len) - field_len_buf;
-			iov_dup(field_len_buf, field_len_len);
-			iov_dup(field, field_len);
+			vbuf_dup(wbuf, field_len_buf, field_len_len);
+			vbuf_dup(wbuf, field, field_len);
 			*tuple_len += field_len_len + field_len;
 			break;
 		}
@@ -184,14 +200,15 @@ iov_add_lua_table(struct lua_State *L, int index)
 	}
 }
 
-void iov_add_ret(struct lua_State *L, int index)
+static void
+add_ret(struct vbuf *wbuf, struct lua_State *L, int index)
 {
 	int type = lua_type(L, index);
 	struct tuple *tuple;
 	switch (type) {
 	case LUA_TTABLE:
 	{
-		iov_add_lua_table(L, index);
+		add_lua_table(wbuf, L, index);
 		return;
 	}
 	case LUA_TNUMBER:
@@ -244,8 +261,8 @@ void iov_add_ret(struct lua_State *L, int index)
 		tnt_raise(ClientError, :ER_PROC_RET, lua_typename(L, type));
 		break;
 	}
-	fiber_ref_tuple(tuple);
-	iov_add(&tuple->bsize, tuple_len(tuple));
+	tuple_guard(wbuf, tuple);
+	vbuf_add(wbuf, &tuple->bsize, tuple_len(tuple));
 }
 
 /**
@@ -256,13 +273,14 @@ void iov_add_ret(struct lua_State *L, int index)
  * and return the number of return values first, and
  * then each return value as a tuple.
  */
-- (void) addLuaMultret: (struct lua_State *) L
+- (void) addLuaMultret: (struct lua_State *)L
 {
 	int nargs = lua_gettop(L);
-	iov_dup(&nargs, sizeof(u32));
+	vbuf_dup(&conn->wbuf, &nargs, sizeof(u32));
 	for (int i = 1; i <= nargs; ++i)
-		iov_add_ret(L, i);
+		add_ret(&conn->wbuf, L, i);
 }
+
 @end
 
 
@@ -274,20 +292,16 @@ void iov_add_ret(struct lua_State *L, int index)
 @end
 
 Port *port_null;
-Port *port_iproto;
 
 void
 port_init()
 {
-	port_iproto = [[PortIproto alloc] init];
 	port_null = [[PortNull alloc] init];
 }
 
 void
 port_free()
 {
-	if (port_iproto)
-		[port_iproto free];
 	if (port_null)
 		[port_null free];
 }
