@@ -53,7 +53,6 @@
 @interface SystemError: tnt_Exception {
 	@public
 		/* errno code */
-		int error;
 		int errnum;
 		/* error description */
 		char errmsg[TNT_ERRMSG_MAX];
