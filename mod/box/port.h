@@ -36,7 +36,7 @@ struct tuple;
 struct lua_State;
 
 @interface Port: Object
-- (void) addU32: (u32 *)u32;
+- (u32 *) addU32;
 - (void) dupU32: (u32)u32;
 - (void) addTuple: (struct tuple *)tuple;
 - (void) addLuaMultret: (struct lua_State *)L;

@@ -870,9 +870,8 @@ do_update_ops(struct update_cmd *cmd, struct tuple *new_tuple)
 	if (count == 0)
 		tnt_raise(IllegalParams, :"tuple count must be positive");
 
-	uint32_t *found = palloc(fiber->gc_pool, sizeof(*found));
+	uint32_t *found = [port addU32];
 	*found = 0;
-	[port addU32: found];
 
 	ERROR_INJECT_EXCEPTION(ERRINJ_TESTING);
 

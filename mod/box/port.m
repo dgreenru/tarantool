@@ -69,10 +69,10 @@ tuple_guard(struct vbuf *wbuf, struct tuple *tuple)
 }
 
 @implementation Port
-- (void) addU32: (u32 *)p_u32
+- (u32 *) addU32
 {
 	[self subclassResponsibility: _cmd];
-	(void) p_u32;
+	return NULL;
 }
 - (void) dupU32: (u32)u32
 {
@@ -110,9 +110,11 @@ tuple_guard(struct vbuf *wbuf, struct tuple *tuple)
 	return self;
 }
 
-- (void) addU32: (u32 *) p_u32
+- (u32 *) addU32
 {
+	u32 *p_u32 = palloc(wbuf->pool, sizeof(u32));
 	vbuf_add(wbuf, p_u32, sizeof(u32));
+	return p_u32;
 }
 
 - (void) dupU32: (u32) u32
@@ -138,8 +140,8 @@ tuple_guard(struct vbuf *wbuf, struct tuple *tuple)
 static void
 add_lua_table(struct vbuf *wbuf, struct lua_State *L, int index)
 {
-	u32 *field_count = palloc(fiber->gc_pool, sizeof(u32));
-	u32 *tuple_len = palloc(fiber->gc_pool, sizeof(u32));
+	u32 *field_count = palloc(wbuf->pool, sizeof(u32));
+	u32 *tuple_len = palloc(wbuf->pool, sizeof(u32));
 
 	*field_count = 0;
 	*tuple_len = 0;
@@ -285,7 +287,7 @@ add_ret(struct vbuf *wbuf, struct lua_State *L, int index)
 
 
 @implementation PortNull
-- (void) addU32: (u32 *) p_u32                  { (void) p_u32; }
+- (u32 *) addU32				{ static u32 dummy; return &dummy; }
 - (void) dupU32: (u32) u32	                { (void) u32; }
 - (void) addTuple: (struct tuple *) tuple       { (void) tuple; }
 - (void) addLuaMultret: (struct lua_State *) L  { (void) L; }
