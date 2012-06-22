@@ -68,69 +68,57 @@ tuple_guard(struct vbuf *wbuf, struct tuple *tuple)
 	vbuf_register_cleanup(wbuf, tuple_unref, tuple);
 }
 
-@implementation Port
-- (u32 *) addU32
+u32*
+port_null_add_u32(void *data __attribute__((unused)))
 {
-	[self subclassResponsibility: _cmd];
-	return NULL;
-}
-- (void) dupU32: (u32)u32
-{
-	[self subclassResponsibility: _cmd];
-	(void) u32;
-}
-- (void) addTuple: (struct tuple *)tuple
-{
-	[self subclassResponsibility: _cmd];
-	(void) tuple;
-}
-- (void) addLuaMultret: (struct lua_State *)L
-{
-	[self subclassResponsibility: _cmd];
-	(void) L;
-}
-@end
-
-@implementation PortIproto
-
-+ (PortIproto *) alloc
-{
-	size_t sz = class_getInstanceSize(self);
-	id obj = palloc(fiber->gc_pool, sz);
-	object_setClass(obj, self);
-	return obj;
+	static u32 dummy;
+	return &dummy;
 }
 
-- (PortIproto *) init: (struct vbuf *)wbuf_
+void
+port_null_dup_u32(void *data __attribute__((unused)),
+		  u32 num __attribute__((unused)))
 {
-	self = [super init];
-	if (self) {
-		wbuf = wbuf_;
-	}
-	return self;
 }
 
-- (u32 *) addU32
+void
+port_null_add_tuple(void *data __attribute__((unused)),
+		    struct tuple *tuple __attribute__((unused)))
 {
-	u32 *p_u32 = palloc(wbuf->pool, sizeof(u32));
-	vbuf_add(wbuf, p_u32, sizeof(u32));
+}
+
+void
+port_null_add_lua_multret(void *data __attribute__((unused)),
+			  struct lua_State *L __attribute__((unused)))
+{
+}
+
+static u32*
+port_iproto_add_u32(void *data)
+{
+	struct vbuf *vbuf = data;
+	u32 *p_u32 = palloc(vbuf->pool, sizeof(u32));
+	vbuf_add(vbuf, p_u32, sizeof(u32));
 	return p_u32;
 }
 
-- (void) dupU32: (u32) u32
+static void
+port_iproto_dup_u32(void *data, u32 num)
 {
-	vbuf_dup(wbuf, &u32, sizeof(u32));
+	struct vbuf *vbuf = data;
+	vbuf_dup(vbuf, &num, sizeof(u32));
 }
 
-- (void) addTuple: (struct tuple *) tuple
+static void
+port_iproto_add_tuple(void *data, struct tuple *tuple)
 {
+	struct vbuf *vbuf = data;
 	size_t len = tuple_len(tuple);
-
 	if (len > BOX_REF_THRESHOLD) {
-		tuple_guard(wbuf, tuple);
-		vbuf_add(wbuf, &tuple->bsize, len);
+		tuple_guard(vbuf, tuple);
+		vbuf_add(vbuf, &tuple->bsize, len);
 	} else {
-		vbuf_dup(wbuf, &tuple->bsize, len);
+		vbuf_dup(vbuf, &tuple->bsize, len);
 	}
 }
 
@@ -275,35 +263,41 @@ add_ret(struct vbuf *wbuf, struct lua_State *L, int index)
  * and return the number of return values first, and
  * then each return value as a tuple.
  */
-- (void) addLuaMultret: (struct lua_State *)L
+static void
+port_iproto_add_lua_multret(void *data, struct lua_State *L)
 {
+	struct vbuf *vbuf = data;
 	int nargs = lua_gettop(L);
-	vbuf_dup(wbuf, &nargs, sizeof(u32));
+	vbuf_dup(vbuf, &nargs, sizeof(u32));
 	for (int i = 1; i <= nargs; ++i)
-		add_ret(wbuf, L, i);
+		add_ret(vbuf, L, i);
 }
 
-@end
+struct port_vtab port_null_vtab = {
+	port_null_add_u32,
+	port_null_dup_u32,
+	port_null_add_tuple,
+	port_null_add_lua_multret,
+};
 
+struct port_vtab port_iproto_vtab = {
+	port_iproto_add_u32,
+	port_iproto_dup_u32,
+	port_iproto_add_tuple,
+	port_iproto_add_lua_multret,
+};
 
-@implementation PortNull
-- (u32 *) addU32				{ static u32 dummy; return &dummy; }
-- (void) dupU32: (u32) u32	                { (void) u32; }
-- (void) addTuple: (struct tuple *) tuple       { (void) tuple; }
-- (void) addLuaMultret: (struct lua_State *) L  { (void) L; }
-@end
-
-Port *port_null;
+struct port port_null = {
+	.vtab = &port_null_vtab,
+	.data = NULL,
+};
 
 void
 port_init()
 {
-	port_null = [[PortNull alloc] init];
 }
 
 void
 port_free()
 {
-	if (port_null)
-		[port_null free];
 }

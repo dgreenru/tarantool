@@ -597,35 +597,20 @@ static const struct luaL_reg lbox_iterator_meta[] = {
  * everything into Lua stack first.
  * @sa iov_add_multret
  */
-@interface PortLua: PortNull {
-	struct lua_State *L;
-}
-+ (PortLua *) alloc;
-- (id) init: (struct lua_State *) L_arg;
-@end
 
-@implementation PortLua
-+ (PortLua *) alloc
+static void
+port_lua_add_tuple(void *data, struct tuple *tuple)
 {
-	size_t sz = class_getInstanceSize(self);
-	id new = palloc(fiber->gc_pool, sz);
-	object_setClass(new, self);
-	return new;
-}
-
-- (id) init: (struct lua_State *) L_arg
-{
-	if ((self = [super init]))
-		L = L_arg;
-	return self;
-}
-
-- (void) addTuple: (struct tuple *) tuple
-{
+	lua_State *L = data;
 	lbox_pushtuple(L, tuple);
 }
 
-@end
+struct port_vtab port_lua_vtab = {
+	port_null_add_u32,
+	port_null_dup_u32,
+	port_lua_add_tuple,
+	port_null_add_lua_multret,
+};
 
 /* }}} */
 
@@ -661,10 +646,10 @@ static int lbox_process(lua_State *L)
 	int top = lua_gettop(L); /* to know how much is added by rw_callback */
 
 	struct txn *txn = txn_begin();
-	Port *port_lua = [[PortLua alloc] init: L];
+	struct port *port = port_create(&port_lua_vtab, L);
 	size_t allocated_size = palloc_allocated(fiber->gc_pool);
 	@try {
-		box_process(txn, port_lua, op, &req);
+		box_process(txn, port, op, &req);
 	} @finally {
 		/*
 		 * This only works as long as port_lua doesn't
@@ -725,7 +710,7 @@ box_lua_panic(struct lua_State *L)
  * Invoke a Lua stored procedure from the binary protocol
  * (implementation of 'CALL' command code).
  */
-- (void) execute: (struct txn *) txn : (Port *)port
+- (void) execute: (struct txn *) txn : (struct port *)port
 {
 	(void) txn;
 	lua_State *L = lua_newthread(root_L);
@@ -746,7 +731,7 @@ box_lua_panic(struct lua_State *L)
 		}
 		lua_call(L, nargs, LUA_MULTRET);
 		/* Send results of the called procedure to the client. */
-		[port addLuaMultret: L];
+		port_add_lua_multret(port, L);
 	} @finally {
 		/*
 		 * Allow the used coro to be garbage collected.

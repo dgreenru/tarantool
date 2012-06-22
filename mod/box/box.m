@@ -46,9 +46,9 @@
 #include "request.h"
 #include "txn.h"
 
-static void box_process_ro(struct txn *txn, Port *port,
+static void box_process_ro(struct txn *txn, struct port *port,
 			   u32 op, struct tbuf *request_data);
-static void box_process_rw(struct txn *txn, Port *port,
+static void box_process_rw(struct txn *txn, struct port *port,
 			   u32 op, struct tbuf *request_data);
 box_process_func box_process = box_process_ro;
 
@@ -84,7 +84,7 @@ box_snap_row(const struct tbuf *t)
 }
 
 static void
-box_process_rw(struct txn *txn, Port *port,
+box_process_rw(struct txn *txn, struct port *port,
 	       u32 op, struct tbuf *data)
 {
 	ev_tstamp start = ev_now(), stop;
@@ -109,7 +109,7 @@ box_process_rw(struct txn *txn, Port *port,
 }
 
 static void
-box_process_ro(struct txn *txn, Port *port,
+box_process_ro(struct txn *txn, struct port *port,
 	       u32 op, struct tbuf *request_data)
 {
 	if (!request_is_select(op)) {
@@ -286,7 +286,7 @@ recover_row(struct tbuf *t)
 		struct txn *txn = txn_begin();
 		txn->txn_flags |= BOX_NOT_STORE;
 
-		box_process_rw(txn, port_null, op, t);
+		box_process_rw(txn, &port_null, op, t);
 	}
 	@catch (id e) {
 		return -1;
@@ -454,7 +454,7 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 		:(uint32_t)msg_code
 		:(struct tbuf *)request
 {
-	PortIproto *port = [[PortIproto alloc] init: wbuf];
+	struct port *port = port_create(&port_iproto_vtab, wbuf);
 	box_process(txn_begin(), port, msg_code, request);
 }
 
@@ -473,7 +473,7 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 		:(uint32_t)msg_code
 		:(struct tbuf *)request
 {
-	PortIproto *port = [[PortIproto alloc] init: wbuf];
+	struct port *port = port_create(&port_iproto_vtab, wbuf);
 	box_process_ro(txn_begin(), port, msg_code, request);
 }
 

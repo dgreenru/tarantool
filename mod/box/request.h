@@ -38,7 +38,6 @@ enum {
 	/** A limit on how many operations a single UPDATE can have. */
 	BOX_UPDATE_OP_CNT_MAX = 128,
 };
-@class Port;
 struct txn;
 
 #define BOX_RETURN_TUPLE		0x01
@@ -107,7 +106,7 @@ request_is_select(u32 type)
 + (Request *) alloc;
 + (Request *) build: (u32) type_arg;
 - (id) init: (struct tbuf *) data_arg;
-- (void) execute: (struct txn *) txn :(Port *) port;
+- (void) execute: (struct txn *) txn :(struct port *) port;
 @end
 
 #endif /* TARANTOOL_BOX_REQUEST_H_INCLUDED */
