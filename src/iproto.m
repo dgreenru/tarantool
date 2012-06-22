@@ -478,7 +478,7 @@ batch_process_msg(struct batch *batch)
 
 			IProtoConnection *conn = batch->conn;
 			IProtoService *serv = (IProtoService *) conn->service;
-			[serv process: &batch->outbuf :msg->msg_code :&request];
+			(serv->handler)(&batch->outbuf, msg->msg_code, &request);
 
 			reply->ret_code = 0;
 		}
@@ -605,6 +605,8 @@ batch_destroy(struct batch *batch)
 static void
 batch_init(void)
 {
+	TAILQ_INIT(&batch_running);
+
 	ev_init(&batch_postio, (void *) batch_postio_dispatch);
 	ev_prepare_start(&batch_postio);
 }
@@ -615,11 +617,13 @@ batch_init(void)
 
 @implementation IProtoService
 
-- (id) init: (const char *)name :(struct service_config *)config
+- (id) init: (const char *)name
+	   :(struct service_config *)config
+	   :(iproto_handler)handler_arg;
 {
 	self = [super init: name :config];
 	if (self) {
-		TAILQ_INIT(&batch_running);
+		handler = handler_arg;
 	}
 	return self;
 }

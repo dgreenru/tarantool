@@ -437,11 +437,20 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 
 @implementation BoxPrimaryService
 
+static void
+iproto_primary_handler(struct vbuf *vbuf, u32 op, struct tbuf *request)
+{
+	struct port *port = port_create(&port_iproto_vtab, vbuf);
+	box_process(txn_begin(), port, op, request);
+}
+
 - (id) init
 {
 	struct service_config config;
 	tarantool_config_service(&config, cfg.primary_port);
-	return [super init: "primary" :&config];
+	return [super init: "primary"
+			  :&config
+			  :iproto_primary_handler];
 }
 
 - (void) onBind
@@ -450,31 +459,24 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 	box_enter_master_or_replica_mode(&cfg);
 }
 
-- (void) process: (struct vbuf *)wbuf
-		:(uint32_t)msg_code
-		:(struct tbuf *)request
-{
-	struct port *port = port_create(&port_iproto_vtab, wbuf);
-	box_process(txn_begin(), port, msg_code, request);
-}
-
 @end
 
 @implementation BoxSecondaryService
+
+static void
+iproto_secondary_handler(struct vbuf *vbuf, u32 op, struct tbuf *request)
+{
+	struct port *port = port_create(&port_iproto_vtab, vbuf);
+	box_process_ro(txn_begin(), port, op, request);
+}
 
 - (id) init
 {
 	struct service_config config;
 	tarantool_config_service(&config, cfg.secondary_port);
-	return [super init: "secondary" :&config];
-}
-
-- (void) process: (struct vbuf *)wbuf
-		:(uint32_t)msg_code
-		:(struct tbuf *)request
-{
-	struct port *port = port_create(&port_iproto_vtab, wbuf);
-	box_process_ro(txn_begin(), port, msg_code, request);
+	return [super init: "secondary"
+			  :&config
+			  :iproto_secondary_handler];
 }
 
 @end

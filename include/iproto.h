@@ -64,16 +64,22 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 }
 
 
+typedef void (*iproto_handler)(struct vbuf *vbuf,
+			       uint32_t msg_code,
+			       struct tbuf *request);
+
+
 /**
  * IProto Service.
  */
 @interface IProtoService: Service {
+@public
+	iproto_handler handler;
 }
 
-/* Extension point. */
-- (void) process: (struct vbuf *)wbuf
-		:(uint32_t)msg_code
-		:(struct tbuf *)request;
+- (id) init: (const char *)name
+	   :(struct service_config *)config
+	   :(iproto_handler)handler;
 
 @end
 
