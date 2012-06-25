@@ -66,7 +66,7 @@ struct meta {
 } __packed__;
 
 static u64
-natoq(const u8 *start, const u8 *end)
+natoq(const uint8_t *start, const uint8_t *end)
 {
 	u64 num = 0;
 	while (start < end)
@@ -75,7 +75,7 @@ natoq(const u8 *start, const u8 *end)
 }
 
 static void
-store(void *key, u32 exptime, u32 flags, u32 bytes, u8 *data)
+store(void *key, u32 exptime, u32 flags, u32 bytes, uint8_t *data)
 {
 	u32 box_flags = 0;
 	u32 field_count = 4;
@@ -106,7 +106,7 @@ store(void *key, u32 exptime, u32 flags, u32 bytes, u8 *data)
 
 	int key_len = load_varint32(&key);
 	say_debug("memcached/store key:(%i)'%.*s' exptime:%lu flags:%lu cas:%llu",
-		  key_len, key_len, (u8 *)key, (unsigned long)exptime,
+		  key_len, key_len, (uint8_t *)key, (unsigned long)exptime,
 		  (unsigned long)flags, (unsigned long long)cas);
 	/*
 	 * Use a box dispatch wrapper which handles correctly
@@ -154,7 +154,7 @@ static bool
 is_numeric(void *field, u32 value_len)
 {
 	for (int i = 0; i < value_len; i++)
-		if (*((u8 *)field + i) < '0' || '9' < *((u8 *)field + i))
+		if (*((uint8_t *)field + i) < '0' || '9' < *((uint8_t *)field + i))
 			return false;
 	return true;
 }
@@ -263,7 +263,7 @@ void memcached_get(size_t keys_count, struct tbuf *keys,
 
 		if (show_cas) {
 			struct tbuf *b = tbuf_alloc(fiber->gc_pool);
-			tbuf_printf(b, "VALUE %.*s %lu %lu %llu\r\n", key_len, (u8 *)key,
+			tbuf_printf(b, "VALUE %.*s %lu %lu %llu\r\n", key_len, (uint8_t *)key,
 				(unsigned long)m->flags, (unsigned long)value_len,
 				(unsigned long long)m->cas);
 			iov_add_unsafe(b->data, b->size);

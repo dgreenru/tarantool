@@ -61,7 +61,7 @@ struct box_snap_row {
 	u32 space;
 	u32 tuple_size;
 	u32 data_size;
-	u8 data[];
+	uint8_t data[];
 } __attribute__((packed));
 
 
@@ -179,7 +179,7 @@ box_xlog_sprint(struct tbuf *buf, const struct tbuf *t)
 
 		while (op_cnt-- > 0) {
 			field_no = read_u32(b);
-			u8 op = read_u8(b);
+			uint8_t op = read_u8(b);
 			void *arg = read_field(b);
 
 			tbuf_printf(buf, " [field_no:%i op:", field_no);

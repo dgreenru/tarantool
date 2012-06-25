@@ -42,8 +42,8 @@ static int __attribute__((noinline))
 memcached_dispatch()
 {
 	int cs;
-	u8 *p, *pe;
-	u8 *fstart;
+	uint8_t *p, *pe;
+	uint8_t *fstart;
 	struct tbuf *keys = tbuf_alloc(fiber->gc_pool);
 	void *key;
 	bool append, show_cas;
@@ -51,7 +51,7 @@ memcached_dispatch()
 	u64 cas, incr;
 	u32 flags, exptime, bytes;
 	bool noreply = false;
-	u8 *data = NULL;
+	uint8_t *data = NULL;
 	bool done = false;
 	int r;
 	size_t saved_iov_cnt = fiber->iov_cnt;
@@ -255,7 +255,7 @@ tr26:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -277,8 +277,8 @@ tr26:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 63 "mod/box/memcached-grammar.rl"
 	{
@@ -295,7 +295,7 @@ tr30:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -317,8 +317,8 @@ tr30:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 63 "mod/box/memcached-grammar.rl"
 	{
@@ -337,7 +337,7 @@ tr39:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -359,8 +359,8 @@ tr39:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 63 "mod/box/memcached-grammar.rl"
 	{
@@ -379,7 +379,7 @@ tr58:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -401,8 +401,8 @@ tr58:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 92 "mod/box/memcached-grammar.rl"
 	{
@@ -437,7 +437,7 @@ tr62:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -459,8 +459,8 @@ tr62:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 92 "mod/box/memcached-grammar.rl"
 	{
@@ -497,7 +497,7 @@ tr71:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -519,8 +519,8 @@ tr71:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 92 "mod/box/memcached-grammar.rl"
 	{
@@ -557,7 +557,7 @@ tr91:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -579,8 +579,8 @@ tr91:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 81 "mod/box/memcached-grammar.rl"
 	{
@@ -599,7 +599,7 @@ tr95:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -621,8 +621,8 @@ tr95:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 81 "mod/box/memcached-grammar.rl"
 	{
@@ -643,7 +643,7 @@ tr105:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -665,8 +665,8 @@ tr105:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 81 "mod/box/memcached-grammar.rl"
 	{
@@ -688,8 +688,8 @@ tr118:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 119 "mod/box/memcached-grammar.rl"
 	{
@@ -753,8 +753,8 @@ tr122:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 119 "mod/box/memcached-grammar.rl"
 	{
@@ -820,8 +820,8 @@ tr132:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 119 "mod/box/memcached-grammar.rl"
 	{
@@ -885,8 +885,8 @@ tr141:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 174 "mod/box/memcached-grammar.rl"
 	{
@@ -919,8 +919,8 @@ tr146:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 174 "mod/box/memcached-grammar.rl"
 	{
@@ -949,8 +949,8 @@ tr157:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 174 "mod/box/memcached-grammar.rl"
 	{
@@ -977,8 +977,8 @@ tr169:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 203 "mod/box/memcached-grammar.rl"
 	{
@@ -999,8 +999,8 @@ tr174:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 203 "mod/box/memcached-grammar.rl"
 	{
@@ -1021,8 +1021,8 @@ tr185:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 203 "mod/box/memcached-grammar.rl"
 	{
@@ -1041,8 +1041,8 @@ tr195:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 192 "mod/box/memcached-grammar.rl"
 	{
@@ -1062,8 +1062,8 @@ tr213:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 217 "mod/box/memcached-grammar.rl"
 	{
@@ -1077,7 +1077,7 @@ tr233:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -1099,8 +1099,8 @@ tr233:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 72 "mod/box/memcached-grammar.rl"
 	{
@@ -1117,7 +1117,7 @@ tr237:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -1139,8 +1139,8 @@ tr237:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 72 "mod/box/memcached-grammar.rl"
 	{
@@ -1159,7 +1159,7 @@ tr246:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -1181,8 +1181,8 @@ tr246:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 72 "mod/box/memcached-grammar.rl"
 	{
@@ -1201,7 +1201,7 @@ tr263:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -1223,8 +1223,8 @@ tr263:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 58 "mod/box/memcached-grammar.rl"
 	{
@@ -1237,7 +1237,7 @@ tr267:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -1259,8 +1259,8 @@ tr267:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 58 "mod/box/memcached-grammar.rl"
 	{
@@ -1275,7 +1275,7 @@ tr276:
 	{ p++; }
 #line 251 "mod/box/memcached-grammar.rl"
 	{
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -1297,8 +1297,8 @@ tr276:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 58 "mod/box/memcached-grammar.rl"
 	{
@@ -1312,8 +1312,8 @@ tr281:
 #line 272 "mod/box/memcached-grammar.rl"
 	{
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 #line 213 "mod/box/memcached-grammar.rl"
 	{

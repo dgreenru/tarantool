@@ -131,7 +131,7 @@ iov_add_lua_table(struct lua_State *L, int index)
 	iov_add(tuple_len, sizeof(u32));
 	iov_add(field_count, sizeof(u32));
 
-	u8 field_len_buf[5];
+	uint8_t field_len_buf[5];
 	size_t field_len, field_len_len;
 	const char *field;
 

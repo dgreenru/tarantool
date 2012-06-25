@@ -23,6 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+#include <stdint.h>
 
 #include "pickle.h"
 #include <tbuf.h>
@@ -32,57 +33,57 @@
 #include "exception.h"
 
 /* caller must ensure that there is space in target */
-u8 *
-save_varint32(u8 *target, u32 value)
+uint8_t *
+save_varint32(uint8_t *target, uint32_t value)
 {
 
 	if (value >= (1 << 7)) {
 		if (value >= (1 << 14)) {
 			if (value >= (1 << 21)) {
 				if (value >= (1 << 28))
-					*(target++) = (u8)(value >> 28) | 0x80;
-				*(target++) = (u8)(value >> 21) | 0x80;
+					*(target++) = (uint8_t)(value >> 28) | 0x80;
+				*(target++) = (uint8_t)(value >> 21) | 0x80;
 			}
-			*(target++) = (u8)((value >> 14) | 0x80);
+			*(target++) = (uint8_t)((value >> 14) | 0x80);
 		}
-		*(target++) = (u8)((value >> 7) | 0x80);
+		*(target++) = (uint8_t)((value >> 7) | 0x80);
 	}
-	*(target++) = (u8)((value) & 0x7F);
+	*(target++) = (uint8_t)((value) & 0x7F);
 
 	return target;
 }
 
 inline static void
-append_byte(struct tbuf *b, u8 byte)
+append_byte(struct tbuf *b, uint8_t byte)
 {
-	*((u8 *)b->data + b->size) = byte;
+	*((uint8_t *)b->data + b->size) = byte;
 	b->size++;
 }
 
 void
-write_varint32(struct tbuf *b, u32 value)
+write_varint32(struct tbuf *b, uint32_t value)
 {
 	tbuf_ensure(b, 5);
 	if (value >= (1 << 7)) {
 		if (value >= (1 << 14)) {
 			if (value >= (1 << 21)) {
 				if (value >= (1 << 28))
-					append_byte(b, (u8)(value >> 28) | 0x80);
-				append_byte(b, (u8)(value >> 21) | 0x80);
+					append_byte(b, (uint8_t)(value >> 28) | 0x80);
+				append_byte(b, (uint8_t)(value >> 21) | 0x80);
 			}
-			append_byte(b, (u8)((value >> 14) | 0x80));
+			append_byte(b, (uint8_t)((value >> 14) | 0x80));
 		}
-		append_byte(b, (u8)((value >> 7) | 0x80));
+		append_byte(b, (uint8_t)((value >> 7) | 0x80));
 	}
-	append_byte(b, (u8)((value) & 0x7F));
+	append_byte(b, (uint8_t)((value) & 0x7F));
 }
 
 #define read_u(bits)									\
-	u##bits read_u##bits(struct tbuf *b)						\
+	uint##bits##_t read_u##bits(struct tbuf *b)						\
 	{										\
 		if (b->size < (bits)/8)							\
 			tnt_raise(IllegalParams, :"packet too short (expected "#bits" bits)");\
-		u##bits r = *(u##bits *)b->data;					\
+		uint##bits##_t r = *(uint##bits##_t *)b->data;					\
 		b->capacity -= (bits)/8;							\
 		b->size -= (bits)/8;							\
 		b->data += (bits)/8;							\
@@ -97,7 +98,7 @@ read_u(64)
 u32
 read_varint32(struct tbuf *buf)
 {
-	u8 *b = buf->data;
+	uint8_t *b = buf->data;
 	int size = buf->size;
 
 	if (size < 1) {
@@ -154,7 +155,7 @@ read_varint32(struct tbuf *buf)
 u32
 pick_u32(void *data, void **rest)
 {
-	u32 *b = data;
+	uint32_t *b = data;
 	if (rest != NULL)
 		*rest = b + 1;
 	return *b;
@@ -164,7 +165,7 @@ void *
 read_field(struct tbuf *buf)
 {
 	void *p = buf->data;
-	u32 data_len = read_varint32(buf);
+	uint32_t data_len = read_varint32(buf);
 
 	if (data_len > buf->size)
 		tnt_raise(IllegalParams, :"packet too short (expected a field)");
@@ -176,7 +177,7 @@ read_field(struct tbuf *buf)
 }
 
 void *
-read_str(struct tbuf *buf, u32 size)
+read_str(struct tbuf *buf, uint32_t size)
 {
 	void *p = buf->data;
 
@@ -190,10 +191,10 @@ read_str(struct tbuf *buf, u32 size)
 }
 
 u32
-valid_tuple(struct tbuf *buf, u32 field_count)
+valid_tuple(struct tbuf *buf, uint32_t field_count)
 {
 	void *data = buf->data;
-	u32 r, size = buf->size;
+	uint32_t r, size = buf->size;
 
 	for (int i = 0; i < field_count; i++)
 		read_field(buf);
@@ -205,7 +206,7 @@ valid_tuple(struct tbuf *buf, u32 field_count)
 }
 
 size_t
-varint32_sizeof(u32 value)
+varint32_sizeof(uint32_t value)
 {
 	if (value < (1 << 7))
 		return 1;

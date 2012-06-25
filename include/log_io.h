@@ -28,6 +28,8 @@
 #include <stdio.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stdint.h>
+
 #include "util.h"
 #include "tbuf.h"
 #include "tarantool_ev.h"
@@ -135,7 +137,7 @@ struct row_v11 {
 	struct header_v11 header;
 	u16 tag;
 	u64 cookie;
-	u8 data[];
+	uint8_t data[];
 } __attribute__((packed));
 
 void

@@ -140,7 +140,7 @@ lbox_tuple_slice(struct lua_State *L)
 	if (end <= start)
 		luaL_error(L, "tuple.slice(): start must be less than end");
 
-	u8 *field = tuple->data;
+	uint8_t *field = tuple->data;
 	int fieldno = 0;
 	int stop = end - 1;
 
@@ -161,7 +161,7 @@ static int
 lbox_tuple_unpack(struct lua_State *L)
 {
 	struct tuple *tuple = lua_checktuple(L, 1);
-	u8 *field = tuple->data;
+	uint8_t *field = tuple->data;
 
 	while (field < tuple->data + tuple->bsize) {
 		size_t len = load_varint32((void **) &field);
@@ -235,7 +235,7 @@ lbox_tuple_next(struct lua_State *L)
 {
 	struct tuple *tuple = lua_checktuple(L, 1);
 	int argc = lua_gettop(L) - 1;
-	u8 *field = NULL;
+	uint8_t *field = NULL;
 	size_t len;
 
 	if (argc == 0 || (argc == 1 && lua_type(L, 2) == LUA_TNIL))

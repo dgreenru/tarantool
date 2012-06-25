@@ -33,8 +33,8 @@ static int __attribute__((noinline))
 memcached_dispatch()
 {
 	int cs;
-	u8 *p, *pe;
-	u8 *fstart;
+	uint8_t *p, *pe;
+	uint8_t *fstart;
 	struct tbuf *keys = tbuf_alloc(fiber->gc_pool);
 	void *key;
 	bool append, show_cas;
@@ -42,7 +42,7 @@ memcached_dispatch()
 	u64 cas, incr;
 	u32 flags, exptime, bytes;
 	bool noreply = false;
-	u8 *data = NULL;
+	uint8_t *data = NULL;
 	bool done = false;
 	int r;
 	size_t saved_iov_cnt = fiber->iov_cnt;
@@ -249,7 +249,7 @@ memcached_dispatch()
 		flush_delay = digit+ >fstart %{flush_delay = natoq(fstart, p);};
 
 		action read_data {
-			size_t parsed = p - (u8 *)fiber->rbuf->data;
+			size_t parsed = p - (uint8_t *)fiber->rbuf->data;
 			while (fiber->rbuf->size - parsed < bytes + 2) {
 				if ((r = fiber_bread(fiber->rbuf, bytes + 2 - (pe - p))) <= 0) {
 					say_debug("read returned %i, closing connection", r);
@@ -271,8 +271,8 @@ memcached_dispatch()
 
 		action done {
 			done = true;
-			stats.bytes_read += p - (u8 *)fiber->rbuf->data;
-			tbuf_peek(fiber->rbuf, p - (u8 *)fiber->rbuf->data);
+			stats.bytes_read += p - (uint8_t *)fiber->rbuf->data;
+			tbuf_peek(fiber->rbuf, p - (uint8_t *)fiber->rbuf->data);
 		}
 
 		eol = ("\r\n" | "\n") @{ p++; };

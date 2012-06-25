@@ -51,7 +51,7 @@ struct tuple
 	 * into a contiguous byte array. Each field is prefixed
 	 * with BER-packed field length.
 	 */
-	u8 data[0];
+	uint8_t data[0];
 } __attribute__((packed));
 
 /** Allocate a tuple

@@ -39,6 +39,7 @@
 #include <arpa/inet.h>
 #include <limits.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 #include "fiber.h"
 #include "recovery.h"
@@ -652,7 +653,7 @@ static void
 replication_relay_recv(struct ev_io *w, int __attribute__((unused)) revents)
 {
 	int fd = *((int *)w->data);
-	u8 data;
+	uint8_t data;
 
 	int result = recv(fd, &data, sizeof(data), 0);
 
@@ -670,7 +671,7 @@ replication_relay_recv(struct ev_io *w, int __attribute__((unused)) revents)
 static int
 replication_relay_send_row(struct tbuf *t)
 {
-	u8 *data = t->data;
+	uint8_t *data = t->data;
 	ssize_t bytes, len = t->size;
 	while (len > 0) {
 		bytes = write(fiber->fd, data, len);

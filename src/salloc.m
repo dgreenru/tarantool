@@ -44,9 +44,9 @@
 
 #ifdef SLAB_DEBUG
 #undef NDEBUG
-u8 red_zone[4] = { 0xfa, 0xfa, 0xfa, 0xfa };
+uint8_t red_zone[4] = { 0xfa, 0xfa, 0xfa, 0xfa };
 #else
-u8 red_zone[0] = { };
+uint8_t red_zone[0] = { };
 #endif
 
 const u32 SLAB_MAGIC = 0x51abface;

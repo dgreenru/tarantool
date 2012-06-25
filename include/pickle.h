@@ -25,34 +25,35 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+#include <stdint.h>
 #include <stdbool.h>
 
 #include <util.h>
 
 struct tbuf;
 
-u8 *save_varint32(u8 *target, u32 value);
-void write_varint32(struct tbuf *b, u32 value);
+uint8_t *save_varint32(uint8_t *target, uint32_t value);
+void write_varint32(struct tbuf *b, uint32_t value);
 
-u8 read_u8(struct tbuf *b);
-u16 read_u16(struct tbuf *b);
-u32 read_u32(struct tbuf *b);
-u64 read_u64(struct tbuf *b);
+uint8_t read_u8(struct tbuf *b);
+uint16_t read_u16(struct tbuf *b);
+uint32_t read_u32(struct tbuf *b);
+uint64_t read_u64(struct tbuf *b);
 
-u32 read_varint32(struct tbuf *buf);
+uint32_t read_varint32(struct tbuf *buf);
 void *read_field(struct tbuf *buf);
 
-void *read_str(struct tbuf *buf, u32 len);
+void *read_str(struct tbuf *buf, uint32_t len);
 
-u32 pick_u32(void *data, void **rest);
+uint32_t pick_u32(void *data, void **rest);
 
-u32 valid_tuple(struct tbuf *buf, u32 cardinality);
+uint32_t valid_tuple(struct tbuf *buf, uint32_t cardinality);
 
 size_t varint32_sizeof(u32);
 
-inline static u32 load_varint32(void **data)
+inline static uint32_t load_varint32(void **data)
 {
-	const u8 *b = *data;
+	const uint8_t *b = *data;
 
 	if (!(b[0] & 0x80)) {
 		*data += 1;

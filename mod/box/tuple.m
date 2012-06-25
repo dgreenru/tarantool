@@ -26,6 +26,7 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+#include <stdint.h>
 #include "tuple.h"
 
 #include <pickle.h>
@@ -81,7 +82,7 @@ static void *
 next_field(void *f)
 {
 	u32 size = load_varint32(&f);
-	return (u8 *)f + size;
+	return (uint8_t *)f + size;
 }
 
 /**
@@ -121,10 +122,10 @@ print_field(struct tbuf *buf, void *f)
 	default:
 		tbuf_printf(buf, "'");
 		while (size-- > 0) {
-			if (0x20 <= *(u8 *)f && *(u8 *)f < 0x7f)
-				tbuf_printf(buf, "%c", *(u8 *)f++);
+			if (0x20 <= *(uint8_t *)f && *(uint8_t *)f < 0x7f)
+				tbuf_printf(buf, "%c", *(uint8_t *)f++);
 			else
-				tbuf_printf(buf, "\\x%02X", *(u8 *)f++);
+				tbuf_printf(buf, "\\x%02X", *(uint8_t *)f++);
 		}
 		tbuf_printf(buf, "'");
 		break;

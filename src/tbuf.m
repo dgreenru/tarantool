@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include <palloc.h>
 #include <pickle.h>
@@ -160,7 +161,7 @@ tbuf_append_field(struct tbuf *b, void *f)
 {
 	void *s = f;
 	u32 size = load_varint32(&f);
-	void *next = (u8 *)f + size;
+	void *next = (uint8_t *)f + size;
 	tbuf_append(b, s, next - s);
 }
 
