@@ -50,7 +50,7 @@ remote_row_reader_v11()
 	if (to_read > 0 && fiber_bread(fiber->rbuf, to_read) <= 0)
 		goto error;
 
-	say_debug("read row bytes:%" PRI_SSZ, request_len);
+	say_debug("read row bytes:%lu", (unsigned long)request_len);
 	return tbuf_split(fiber->rbuf, request_len);
 error:
 	say_error("unexpected eof reading row header");
@@ -89,7 +89,7 @@ remote_read_row(struct sockaddr_in *remote_addr, i64 initial_lsn)
 			}
 
 			say_crit("successfully connected to master");
-			say_crit("starting replication from lsn:%" PRIi64, initial_lsn);
+			say_crit("starting replication from lsn:%lld", (long long)initial_lsn);
 
 			warning_said = false;
 			err = NULL;

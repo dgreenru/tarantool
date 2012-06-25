@@ -97,7 +97,7 @@ store(void *key, u32 exptime, u32 flags, u32 bytes, u8 *data)
 	tbuf_append(req, &m, sizeof(m));
 
 	char b[43];
-	sprintf(b, " %"PRIu32" %"PRIu32"\r\n", flags, bytes);
+	sprintf(b, " %lu %lu\r\n", (unsigned long)flags, (unsigned long)bytes);
 	write_varint32(req, strlen(b));
 	tbuf_append(req, b, strlen(b));
 
@@ -105,8 +105,9 @@ store(void *key, u32 exptime, u32 flags, u32 bytes, u8 *data)
 	tbuf_append(req, data, bytes);
 
 	int key_len = load_varint32(&key);
-	say_debug("memcached/store key:(%i)'%.*s' exptime:%"PRIu32" flags:%"PRIu32" cas:%"PRIu64,
-		  key_len, key_len, (u8 *)key, exptime, flags, cas);
+	say_debug("memcached/store key:(%i)'%.*s' exptime:%lu flags:%lu cas:%llu",
+		  key_len, key_len, (u8 *)key, (unsigned long)exptime,
+		  (unsigned long)flags, (unsigned long long)cas);
 	/*
 	 * Use a box dispatch wrapper which handles correctly
 	 * read-only/read-write modes.
@@ -178,25 +179,25 @@ print_stats()
 	struct tbuf *out = tbuf_alloc(fiber->gc_pool);
 	slab_stat2(&bytes_used, &items);
 
-	tbuf_printf(out, "STAT pid %"PRIu32"\r\n", (u32)getpid());
-	tbuf_printf(out, "STAT uptime %"PRIu32"\r\n", (u32)tarantool_uptime());
-	tbuf_printf(out, "STAT time %"PRIu32"\r\n", (u32)ev_now());
+	tbuf_printf(out, "STAT pid %lu\r\n", (unsigned long)getpid());
+	tbuf_printf(out, "STAT uptime %lu\r\n", (unsigned long)tarantool_uptime());
+	tbuf_printf(out, "STAT time %lu\r\n", (unsigned long)ev_now());
 	tbuf_printf(out, "STAT version 1.2.5 (tarantool/box)\r\n");
-	tbuf_printf(out, "STAT pointer_size %"PRI_SZ"\r\n", sizeof(void *)*8);
-	tbuf_printf(out, "STAT curr_items %"PRIu64"\r\n", items);
-	tbuf_printf(out, "STAT total_items %"PRIu64"\r\n", stats.total_items);
-	tbuf_printf(out, "STAT bytes %"PRIu64"\r\n", bytes_used);
-	tbuf_printf(out, "STAT curr_connections %"PRIu32"\r\n", stats.curr_connections);
-	tbuf_printf(out, "STAT total_connections %"PRIu32"\r\n", stats.total_connections);
-	tbuf_printf(out, "STAT connection_structures %"PRIu32"\r\n", stats.curr_connections); /* lie a bit */
-	tbuf_printf(out, "STAT cmd_get %"PRIu64"\r\n", stats.cmd_get);
-	tbuf_printf(out, "STAT cmd_set %"PRIu64"\r\n", stats.cmd_set);
-	tbuf_printf(out, "STAT get_hits %"PRIu64"\r\n", stats.get_hits);
-	tbuf_printf(out, "STAT get_misses %"PRIu64"\r\n", stats.get_misses);
-	tbuf_printf(out, "STAT evictions %"PRIu64"\r\n", stats.evictions);
-	tbuf_printf(out, "STAT bytes_read %"PRIu64"\r\n", stats.bytes_read);
-	tbuf_printf(out, "STAT bytes_written %"PRIu64"\r\n", stats.bytes_written);
-	tbuf_printf(out, "STAT limit_maxbytes %"PRIu64"\r\n", (u64)(cfg.slab_alloc_arena * (1 << 30)));
+	tbuf_printf(out, "STAT pointer_size %lu\r\n", (unsigned long)(sizeof(void *)*8));
+	tbuf_printf(out, "STAT curr_items %llu\r\n", (unsigned long long)items);
+	tbuf_printf(out, "STAT total_items %llu\r\n", (unsigned long long)stats.total_items);
+	tbuf_printf(out, "STAT bytes %llu\r\n", (unsigned long long)bytes_used);
+	tbuf_printf(out, "STAT curr_connections %lu\r\n", (unsigned long)stats.curr_connections);
+	tbuf_printf(out, "STAT total_connections %lu\r\n", (unsigned long)stats.total_connections);
+	tbuf_printf(out, "STAT connection_structures %lu\r\n", (unsigned long)stats.curr_connections); /* lie a bit */
+	tbuf_printf(out, "STAT cmd_get %llu\r\n", (unsigned long long)stats.cmd_get);
+	tbuf_printf(out, "STAT cmd_set %llu\r\n", (unsigned long long)stats.cmd_set);
+	tbuf_printf(out, "STAT get_hits %llu\r\n", (unsigned long long)stats.get_hits);
+	tbuf_printf(out, "STAT get_misses %llu\r\n", (unsigned long long)stats.get_misses);
+	tbuf_printf(out, "STAT evictions %llu\r\n", (unsigned long long)stats.evictions);
+	tbuf_printf(out, "STAT bytes_read %llu\r\n", (unsigned long long)stats.bytes_read);
+	tbuf_printf(out, "STAT bytes_written %llu\r\n", (unsigned long long)stats.bytes_written);
+	tbuf_printf(out, "STAT limit_maxbytes %llu\r\n", (unsigned long long)(cfg.slab_alloc_arena * (1 << 30)));
 	tbuf_printf(out, "STAT threads 1\r\n");
 	tbuf_printf(out, "END\r\n");
 	iov_add(out->data, out->size);
@@ -207,7 +208,7 @@ void memcached_get(size_t keys_count, struct tbuf *keys,
 {
 	stat_collect(stat_base, MEMC_GET, 1);
 	stats.cmd_get++;
-	say_debug("ensuring space for %"PRI_SZ" keys", keys_count);
+	say_debug("ensuring space for %lu keys", (unsigned long)keys_count);
 	iov_ensure(keys_count * 5 + 1);
 	while (keys_count-- > 0) {
 		struct tuple *tuple;
@@ -262,7 +263,9 @@ void memcached_get(size_t keys_count, struct tbuf *keys,
 
 		if (show_cas) {
 			struct tbuf *b = tbuf_alloc(fiber->gc_pool);
-			tbuf_printf(b, "VALUE %.*s %"PRIu32" %"PRIu32" %"PRIu64"\r\n", key_len, (u8 *)key, m->flags, value_len, m->cas);
+			tbuf_printf(b, "VALUE %.*s %lu %lu %llu\r\n", key_len, (u8 *)key,
+				(unsigned long)m->flags, (unsigned long)value_len,
+				(unsigned long long)m->cas);
 			iov_add_unsafe(b->data, b->size);
 			stats.bytes_written += b->size;
 		} else {

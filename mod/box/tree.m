@@ -992,7 +992,8 @@ tree_iterator_free(struct iterator *iterator)
 		size_t sz = estimated_tuples * node_size;
 		nodes = malloc(sz);
 		if (nodes == NULL) {
-			panic("malloc(): failed to allocate %"PRI_SZ" bytes", sz);
+			panic("malloc(): failed to allocate %lu bytes",
+				(unsigned long)sz);
 		}
 	}
 
@@ -1006,8 +1007,8 @@ tree_iterator_free(struct iterator *iterator)
 	}
 
 	if (n_tuples) {
-		say_info("Sorting %"PRIu32 " keys in index %" PRIu32 "...", n_tuples,
-			 index_n(self));
+		say_info("Sorting %lu keys in index %lu...", (unsigned long)n_tuples,
+			(unsigned long)index_n(self));
 	}
 
 	/* If n_tuples == 0 then estimated_tuples = 0, elem == NULL, tree is empty */

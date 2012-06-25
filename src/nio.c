@@ -133,14 +133,16 @@ nlseek(int fd, off_t offset, int whence)
 	off_t effective_offset = lseek(fd, offset, whence);
 
 	if (effective_offset == -1) {
-		say_syserror("lseek, offset=%"PRI_OFFT", whence=%d, [%s]",
-			     (u64) offset, whence,
+		say_syserror("lseek, offset=%llu, whence=%d, [%s]",
+			     (unsigned long long) offset, whence,
 			     nfilename(fd));
 	} else if (whence == SEEK_SET && effective_offset != offset) {
 		say_error("lseek, offset set to unexpected value: "
-			  "requested %"PRI_OFFT", effective %"PRI_OFFT", "
+			  "requested %llu, effective %llu, "
 			  "[%s]",
-			  offset, effective_offset, nfilename(fd));
+			  (unsigned long long)offset,
+			  (unsigned long long)effective_offset,
+			  nfilename(fd));
 	}
 	return effective_offset;
 }

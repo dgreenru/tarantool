@@ -674,7 +674,8 @@ iov_flush(void)
 		for (int i = 0; i < iov_cnt; i++)
 			rem += iov[i].iov_len;
 
-		say_syserror("client unexpectedly gone, %" PRI_SZ " bytes unwritten", rem);
+		say_syserror("client unexpectedly gone, %lu bytes unwritten",
+			(unsigned long)rem);
 		result = r;
 	} else
 		result = bytes;
