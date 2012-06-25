@@ -250,6 +250,22 @@ conn_default_handler(ev_io *watcher, int revents __attribute__((unused)))
 	fiber_call(conn->worker);
 }
 
+void
+conn_attach_worker(CoConnection *conn, struct fiber *worker)
+{
+	assert(worker == NULL && worker->peer == nil);
+	conn->worker = worker;
+	conn->worker->peer = conn;
+}
+
+void
+conn_detach_worker(CoConnection *conn)
+{
+	assert(conn->worker != NULL && conn->worker->peer == conn);
+	conn->worker->peer = nil;
+	conn->worker = NULL;
+}
+
 + (CoConnection *) connect: (struct sockaddr_in *)addr
 {
 	int fd = sock_create();
@@ -280,23 +296,9 @@ conn_default_handler(ev_io *watcher, int revents __attribute__((unused)))
 - (void) close
 {
 	if (worker != NULL) {
-		[self detachWorker];
+		conn_detach_worker(self);
 	}
 	[super close];
-}
-
-- (void) attachWorker: (struct fiber *)worker_
-{
-	assert(worker == NULL && worker_->peer == nil);
-	worker = worker_;
-	worker->peer = self;
-}
-
-- (void) detachWorker
-{
-	assert(worker != NULL && worker->peer == self);
-	worker->peer = nil;
-	worker = NULL;
 }
 
 - (size_t) coRead: (void *)buf :(size_t)count
@@ -728,7 +730,7 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 {
 	assert(fd >= 0);
 
-	[self attachWorker: worker_];
+	conn_attach_worker(self, worker_);
 	fiber_call(worker_);
 }
 

@@ -76,7 +76,7 @@ remote_read_row(struct sockaddr_in *remote_addr, i64 initial_lsn)
 			if (conn == nil) {
 				err = "can't connect to master";
 				conn = [CoConnection connect: remote_addr];
-				[conn attachWorker: fiber];
+				conn_attach_worker(conn, fiber);
 
 				err = "can't write version";
 				[conn coWrite: &initial_lsn :sizeof(initial_lsn)];

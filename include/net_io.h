@@ -144,9 +144,6 @@ conn_stop_output(Connection *conn)
 
 + (CoConnection *) connect: (struct sockaddr_in *)addr;
 
-- (void) attachWorker: (struct fiber *)worker_;
-- (void) detachWorker;
-
 /* Co-operative I/O */
 - (size_t) coRead: (void *)buf :(size_t)count;
 - (size_t) coRead: (void *)buf :(size_t)min_count :(size_t)max_count;
@@ -158,6 +155,8 @@ conn_stop_output(Connection *conn)
 
 @end
 
+void conn_attach_worker(CoConnection *conn, struct fiber *worker);
+void conn_detach_worker(CoConnection *conn);
 
 /**
  * Connection Acceptor
