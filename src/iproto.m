@@ -509,7 +509,7 @@ batch_process_all(void)
 
 		@try {
 			[conn attachWorker: fiber];
-			[conn stopInput];
+			conn_stop_input(conn);
 
 			int count = 0;
 			while (batch_input(batch)) {
@@ -536,7 +536,7 @@ batch_process_all(void)
 
 		[conn detachWorker];
 		if (!batch->closed) {
-			[conn startInput];
+			conn_start_input(conn);
 		} else {
 			[conn close];
 			[conn free];
@@ -557,6 +557,27 @@ batch_worker(void *dummy __attribute__((unused)))
 		fiber_yield();
 	}
 }
+
+static void
+batch_input_handler(ev_io *watcher,
+		    int revents __attribute__((unused)))
+{
+	IProtoConnection *conn = (IProtoConnection *) watcher->data;
+	struct batch *batch = conn->batch;
+	batch->pending_input = 1;
+	if (!batch->running) {
+		TAILQ_INSERT_TAIL(&batch_running, batch, link);
+		batch->running = 1;
+	}
+}
+
+#if 0
+static void
+batch_output_handler(ev_io *watcher,
+		    int revents __attribute__((unused)))
+{
+}
+#endif
 
 static void
 batch_postio_dispatch(ev_watcher *watcher __attribute__((unused)),
@@ -644,8 +665,20 @@ batch_init(void)
 
 - (void) onConnect: (ServiceConnection *)conn
 {
-	[conn startInput];
+	conn_start_input(conn);
 }
+
+- (io_handler) getInputHandler
+{
+	return batch_input_handler;
+}
+
+#if 0
+- (io_handler) getOutputHandler
+{
+	return batch_output_handler;
+}
+#endif
 
 - (void) process: (struct vbuf *)wbuf
 		:(uint32_t)msg_code
@@ -695,22 +728,6 @@ batch_init(void)
 	helper->connection = nil;
 	worker = NULL;
 }
-
-- (void) onInput
-{
-	batch->pending_input = 1;
-	if (!batch->running) {
-		TAILQ_INSERT_TAIL(&batch_running, batch, link);
-		batch->running = 1;
-	}
-}
-
-#if 0
-- (void) onOutput
-{
-	[(IProtoService *)service output: self];
-}
-#endif
 
 @end
 

@@ -174,16 +174,24 @@ conn_ensure_size(int n)
 		/* Register the connection. */
 		assert(ctab[fd] == nil);
 		ctab[fd] = self;
-
-		/* Prepare for input events. */
-		ev_init_input_handler(&input, self);
-		ev_io_set(&input, fd, EV_READ);
-
-		/* Prepare for output events. */
-		ev_init_output_handler(&output, self);
-		ev_io_set(&output, fd, EV_WRITE);
 	}
 	return self;
+}
+
+- (void) initInputHandler: (io_handler) handler
+{
+	/* Prepare for input events. */
+	input.data = self;
+	ev_init(&input, handler);
+	ev_io_set(&input, fd, EV_READ);
+}
+
+- (void) initOutputHandler: (io_handler) handler
+{
+	/* Prepare for output events. */
+	output.data = self;
+	ev_init(&output, handler);
+	ev_io_set(&output, fd, EV_WRITE);
 }
 
 - (void) close
@@ -195,9 +203,9 @@ conn_ensure_size(int n)
 	/* Unregister the connection. */
 	ctab[fd] = nil;
 
-	/* Stop input events. */
-	[self stopInput];
-	[self stopOutput];
+	/* Stop I/O events. */
+	conn_stop_input(self);
+	conn_stop_output(self);
 
 	/* Close the socket. */
 	close(fd);
@@ -207,26 +215,6 @@ conn_ensure_size(int n)
 - (void) info: (struct tbuf *)buf
 {
 	tbuf_printf(buf, "    sock: %d, name: %s, peer: %s" CRLF, fd, name, peer);
-}
-
-- (void) startInput
-{
-	ev_io_start(&input);
-}
-
-- (void) stopInput
-{
-	ev_io_stop(&input);
-}
-
-- (void) startOutput
-{
-	ev_io_start(&output);
-}
-
-- (void) stopOutput
-{
-	ev_io_stop(&output);
 }
 
 - (size_t) read: (void *)buf :(size_t)count
@@ -247,16 +235,6 @@ conn_ensure_size(int n)
 	return sock_writev(fd, iov, iovcnt);
 }
 
-- (void) onInput
-{
-	[self subclassResponsibility: _cmd];
-}
-
-- (void) onOutput
-{
-	[self subclassResponsibility: _cmd];
-}
-
 @end
 
 /* }}} */
@@ -264,6 +242,13 @@ conn_ensure_size(int n)
 /* {{{ Co-operative Network Connection. ***************************/
 
 @implementation CoConnection
+
+static void
+conn_default_handler(ev_io *watcher, int revents __attribute__((unused)))
+{
+	CoConnection *conn = (CoConnection *) watcher->data;
+	fiber_call(conn->worker);
+}
 
 + (CoConnection *) connect: (struct sockaddr_in *)addr
 {
@@ -282,6 +267,8 @@ conn_ensure_size(int n)
 
 		CoConnection *conn = [CoConnection alloc];
 		[conn init: fd];
+		[conn initInputHandler: conn_default_handler];
+		[conn initOutputHandler: conn_default_handler];
 		return conn;
 	}
 	@catch (id) {
@@ -312,15 +299,9 @@ conn_ensure_size(int n)
 	worker = NULL;
 }
 
-- (void) coWork
-{
-	assert(worker != NULL);
-	fiber_call(worker);
-}
-
 - (size_t) coRead: (void *)buf :(size_t)count
 {
-	[self startInput];
+	conn_start_input(self);
 	@try {
 		size_t total = 0;
 		for (;;) {
@@ -350,14 +331,14 @@ conn_ensure_size(int n)
 		return total;
 	}
 	@finally {
-		[self stopInput];
+		conn_stop_input(self);
 	}
 }
 
 - (size_t) coRead: (void *)buf :(size_t)min_count :(size_t)max_count
 {
 	assert(min_count <= max_count);
-	[self startInput];
+	conn_start_input(self);
 	@try {
 		size_t total = 0;
 		for (;;) {
@@ -386,13 +367,13 @@ conn_ensure_size(int n)
 		return total;
 	}
 	@finally {
-		[self stopInput];
+		conn_stop_input(self);
 	}
 }
 
 - (void) coWrite: (void *)buf :(size_t)count
 {
-	[self startOutput];
+	conn_start_output(self);
 	@try {
 		for (;;) {
 			/* Write as much data as possible. */
@@ -411,13 +392,13 @@ conn_ensure_size(int n)
 		}
 	}
 	@finally {
-		[self stopOutput];
+		conn_stop_output(self);
 	}
 }
 
 - (void) coWriteV: (struct iovec *)iov :(int)iovcnt
 {
-	[self startOutput];
+	conn_start_output(self);
 	@try {
 		for (;;) {
 			/* Write as much data as possible. */
@@ -436,7 +417,7 @@ conn_ensure_size(int n)
 		}
 	}
 	@finally {
-		[self stopOutput];
+		conn_stop_output(self);
 	}
 }
 
@@ -454,16 +435,6 @@ conn_ensure_size(int n)
 		buf->size += read;
 	}
 	return read;
-}
-
-- (void) onInput
-{
-	[self coWork];
-}
-
-- (void) onOutput
-{
-	[self coWork];
 }
 
 - (const char *) name
@@ -686,6 +657,8 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	ServiceConnection *conn = [self allocConnection];
 	[conn init: self :fd];
 	[conn initPeer: addr];
+	[conn initInputHandler: [self getInputHandler]];
+	[conn initOutputHandler: [self getOutputHandler]];
 	/* Delegate the use of the connection to a subclass. */
 	[self onConnect: conn];
 }
@@ -701,11 +674,21 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	[self subclassResponsibility: _cmd];
 }
 
+- (io_handler) getInputHandler
+{
+	return conn_default_handler;
+}
+
+- (io_handler) getOutputHandler
+{
+	return conn_default_handler;
+}
+
 @end
 
 /* }}} */
 
-/* {{{ Abstract Network Connection. *******************************/
+/* {{{ Generic Service Connection. ********************************/
 
 @implementation ServiceConnection
 
@@ -746,7 +729,7 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	assert(fd >= 0);
 
 	[self attachWorker: worker_];
-	[self coWork];
+	fiber_call(worker_);
 }
 
 @end

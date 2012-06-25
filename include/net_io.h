@@ -83,11 +83,13 @@ struct service_config
 	ev_tstamp bind_delay;
 };
 
+typedef void (*io_handler)(struct ev_io *watcher, int revents);
 
 /**
  * Generic Network Connection.
  */
-@interface Connection: Object <InputHandler, OutputHandler> {
+@interface Connection: Object {
+@public
 	int fd;
 	struct ev_io input;
 	struct ev_io output;
@@ -97,15 +99,11 @@ struct service_config
 }
 
 - (id) init: (int)fd_;
+- (void) initInputHandler: (io_handler) handler;
+- (void) initOutputHandler: (io_handler) handler;
 - (void) close;
 
 - (void) info: (struct tbuf *)buf;
-
-/* Event control */
-- (void) startInput;
-- (void) stopInput;
-- (void) startOutput;
-- (void) stopOutput;
 
 /* I/O */
 - (size_t) read: (void *)buf :(size_t)count;
@@ -113,6 +111,28 @@ struct service_config
 - (int) writev: (struct iovec *)iov :(int)iovcnt;
 
 @end
+
+/* Event control */
+static inline void
+conn_start_input(Connection *conn)
+{
+	ev_io_start(&conn->input);
+}
+static inline void
+conn_stop_input(Connection *conn)
+{
+	ev_io_stop(&conn->input);
+}
+static inline void
+conn_start_output(Connection *conn)
+{
+	ev_io_start(&conn->output);
+}
+static inline void
+conn_stop_output(Connection *conn)
+{
+	ev_io_stop(&conn->output);
+}
 
 
 /**
@@ -126,8 +146,6 @@ struct service_config
 
 - (void) attachWorker: (struct fiber *)worker_;
 - (void) detachWorker;
-
-- (void) coWork;
 
 /* Co-operative I/O */
 - (size_t) coRead: (void *)buf :(size_t)count;
@@ -179,6 +197,8 @@ struct service_config
 /* Extension points. */
 - (ServiceConnection *) allocConnection;
 - (void) onConnect: (ServiceConnection *)conn;
+- (io_handler) getInputHandler;
+- (io_handler) getOutputHandler;
 
 @end
 
