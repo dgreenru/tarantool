@@ -77,27 +77,24 @@ port_send_tuple(u32 flags, struct port *port, struct tuple *tuple)
 	}
 }
 
-@interface Replace: Request
-- (void) execute: (struct txn *) txn :(struct port *) port;
-@end
-
-@implementation Replace
-- (void) execute: (struct txn *) txn :(struct port *) port
+static void
+execute_replace(struct query *query, struct txn *txn, struct port *port)
 {
-	txn_add_redo(txn, type, data);
-	struct space *sp = read_space(data);
-	u32 flags = read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
-	size_t field_count = read_u32(data);
+	txn_add_redo(txn, query->type, query->data);
+	struct space *sp = read_space(query->data);
+	u32 flags = read_u32(query->data) & BOX_ALLOWED_REQUEST_FLAGS;
+	size_t field_count = read_u32(query->data);
 
 	if (field_count == 0)
 		tnt_raise(IllegalParams, :"tuple field count is 0");
 
-	if (data->size == 0 || data->size != valid_tuple(data, field_count))
+	if (query->data->size == 0 ||
+	    query->data->size != valid_tuple(query->data, field_count))
 		tnt_raise(IllegalParams, :"incorrect tuple length");
 
-	txn->new_tuple = tuple_alloc(data->size);
+	txn->new_tuple = tuple_alloc(query->data->size);
 	txn->new_tuple->field_count = field_count;
-	memcpy(txn->new_tuple->data, data->data, data->size);
+	memcpy(txn->new_tuple->data, query->data->data, query->data->size);
 
 	struct tuple *old_tuple = [sp->index[0] findByTuple: txn->new_tuple];
 
@@ -116,7 +113,6 @@ port_send_tuple(u32 flags, struct port *port, struct tuple *tuple)
 	if (flags & BOX_RETURN_TUPLE)
 		port_add_tuple(port, txn->new_tuple);
 }
-@end
 
 /** {{{ UPDATE request implementation.
  * UPDATE request is represented by a sequence of operations,
@@ -146,10 +142,6 @@ port_send_tuple(u32 flags, struct port *port, struct tuple *tuple)
  * read the source of do_update_ops() to see how these
  * complications  are worked around.
  */
-
-@interface Update: Request
-- (void) execute: (struct txn *) txn :(struct port *) port;
-@end
 
 /** Argument of SET operation. */
 struct op_set_arg {
@@ -826,14 +818,14 @@ do_update_ops(struct update_cmd *cmd, struct tuple *new_tuple)
 	}
 }
 
-@implementation Update
-- (void) execute: (struct txn *) txn :(struct port *) port
+static void
+execute_update(struct query *query, struct txn *txn, struct port *port)
 {
-	txn_add_redo(txn, type, data);
-	struct space *sp = read_space(data);
-	u32 flags = read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
+	txn_add_redo(txn, query->type, query->data);
+	struct space *sp = read_space(query->data);
+	u32 flags = read_u32(query->data) & BOX_ALLOWED_REQUEST_FLAGS;
 	/* Parse UPDATE request. */
-	struct update_cmd *cmd = parse_update_cmd(data);
+	struct update_cmd *cmd = parse_update_cmd(query->data);
 
 	/* Try to find the tuple. */
 	struct tuple *old_tuple =
@@ -849,24 +841,19 @@ do_update_ops(struct update_cmd *cmd, struct tuple *new_tuple)
 
 	port_send_tuple(flags, port, txn->new_tuple);
 }
-@end
 
 /** }}} */
 
-@interface Select: Request
-- (void) execute: (struct txn *) txn :(struct port *) port;
-@end
-
-@implementation Select
-- (void) execute: (struct txn *) txn :(struct port *) port
+static void
+execute_select(struct query *query, struct txn *txn, struct port *port)
 {
 	(void) txn; /* Not used. */
-	struct space *sp = read_space(data);
-	u32 index_no = read_u32(data);
+	struct space *sp = read_space(query->data);
+	u32 index_no = read_u32(query->data);
 	Index *index = index_find(sp, index_no);
-	u32 offset = read_u32(data);
-	u32 limit = read_u32(data);
-	u32 count = read_u32(data);
+	u32 offset = read_u32(query->data);
+	u32 limit = read_u32(query->data);
+	u32 count = read_u32(query->data);
 	if (count == 0)
 		tnt_raise(IllegalParams, :"tuple count must be positive");
 
@@ -884,7 +871,7 @@ do_update_ops(struct update_cmd *cmd, struct tuple *new_tuple)
 		/* read key */
 		u32 key_part_count;
 		void *key;
-		read_key(data, &key, &key_part_count);
+		read_key(query->data, &key, &key_part_count);
 
 		struct iterator *it = index->position;
 		[index initIteratorByKey: it :ITER_FORWARD :key :key_part_count];
@@ -905,27 +892,22 @@ do_update_ops(struct update_cmd *cmd, struct tuple *new_tuple)
 				break;
 		}
 	}
-	if (data->size != 0)
+	if (query->data->size != 0)
 		tnt_raise(IllegalParams, :"can't unpack request");
 }
-@end
 
-@interface Delete: Request
-- (void) execute: (struct txn *) txn :(struct port *) port;
-@end
-
-@implementation Delete
-- (void) execute: (struct txn *) txn :(struct port *) port
+static void
+execute_delete(struct query *query, struct txn *txn, struct port *port)
 {
-	txn_add_redo(txn, type, data);
+	txn_add_redo(txn, query->type, query->data);
 	u32 flags = 0;
-	struct space *sp = read_space(data);
-	if (type == DELETE)
-		flags |= read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
+	struct space *sp = read_space(query->data);
+	if (query->type == DELETE)
+		flags |= read_u32(query->data) & BOX_ALLOWED_REQUEST_FLAGS;
 	/* read key */
 	u32 key_part_count;
 	void *key;
-	read_key(data, &key, &key_part_count);
+	read_key(query->data, &key, &key_part_count);
 	/* try to find tuple in primary index */
 	struct tuple *old_tuple = [sp->index[0] findByKey :key :key_part_count];
 
@@ -933,60 +915,42 @@ do_update_ops(struct update_cmd *cmd, struct tuple *new_tuple)
 
 	port_send_tuple(flags, port, old_tuple);
 }
-@end
 
-@implementation Request
-+ (Request *) alloc
+struct query *
+query_create(u32 type, struct tbuf *data)
 {
-	size_t sz = class_getInstanceSize(self);
-	id new = palloc(fiber->gc_pool, sz);
-	object_setClass(new, self);
-	return new;
+	struct query *query = palloc(fiber->gc_pool, sizeof(struct query));
+	query->type = type;
+	query->data = data;
+	return query;
 }
 
-+ (Request *) build: (u32) type_arg
+void
+query_execute(struct query *query, struct txn *txn, struct port *port)
 {
-	Request *new = nil;
-	switch (type_arg) {
+	switch (query->type) {
 	case REPLACE:
-		new = [Replace alloc]; break;
+		execute_replace(query, txn, port);
+		break;
 	case SELECT:
-		new = [Select alloc]; break;
+		execute_select(query, txn, port);
+		break;
 	case UPDATE:
-		new = [Update alloc]; break;
+		execute_update(query, txn, port);
+		break;
 	case DELETE_1_3:
 	case DELETE:
-		new = [Delete alloc]; break;
+		execute_delete(query, txn, port);
+		break;
 	case CALL:
-		new = [Call alloc]; break;
+		box_lua_execute(query, txn, port);
+		break;
 	default:
-		say_error("Unsupported request = %" PRIi32 "", type_arg);
+		say_error("Unsupported request = %" PRIi32 "", query->type);
 		tnt_raise(IllegalParams, :"unsupported command code, "
 			  "check the error log");
-		break;
 	}
-	new->type = type_arg;
-	return new;
 }
-
-- (id) init: (struct tbuf *) data_arg
-{
-	assert(type);
-	self = [super init];
-	if (self == nil)
-		return self;
-
-	data = data_arg;
-	return self;
-}
-
-- (void) execute: (struct txn *) txn :(struct port *) port
-{
-	(void) txn;
-	(void) port;
-	[self subclassResponsibility: _cmd];
-}
-@end
 
 /**
  * vim: foldmethod=marker

@@ -705,28 +705,28 @@ box_lua_panic(struct lua_State *L)
 	return 0;
 }
 
-@implementation Call
 /**
  * Invoke a Lua stored procedure from the binary protocol
  * (implementation of 'CALL' command code).
  */
-- (void) execute: (struct txn *) txn : (struct port *)port
+void
+box_lua_execute(struct query *query, struct txn *txn, struct port *port)
 {
 	(void) txn;
 	lua_State *L = lua_newthread(root_L);
 	int coro_ref = luaL_ref(root_L, LUA_REGISTRYINDEX);
 	/* Request flags: not used. */
-	(void) (read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS);
+	(void) (read_u32(query->data) & BOX_ALLOWED_REQUEST_FLAGS);
 	@try {
-		u32 field_len = read_varint32(data);
-		void *field = read_str(data, field_len); /* proc name */
+		u32 field_len = read_varint32(query->data);
+		void *field = read_str(query->data, field_len); /* proc name */
 		box_lua_find(L, field, field + field_len);
 		/* Push the rest of args (a tuple). */
-		u32 nargs = read_u32(data);
+		u32 nargs = read_u32(query->data);
 		luaL_checkstack(L, nargs, "call: out of stack");
 		for (int i = 0; i < nargs; i++) {
-			field_len = read_varint32(data);
-			field = read_str(data, field_len);
+			field_len = read_varint32(query->data);
+			field = read_str(query->data, field_len);
 			lua_pushlstring(L, field, field_len);
 		}
 		lua_call(L, nargs, LUA_MULTRET);
@@ -740,7 +740,6 @@ box_lua_panic(struct lua_State *L)
 		luaL_unref(root_L, LUA_REGISTRYINDEX, coro_ref);
 	}
 }
-@end
 
 struct lua_State *
 mod_lua_init(struct lua_State *L)

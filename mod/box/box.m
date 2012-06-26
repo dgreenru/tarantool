@@ -92,8 +92,8 @@ box_process_rw(struct txn *txn, struct port *port,
 	stat_collect(stat_base, op, 1);
 
 	@try {
-		Request *request = [[Request build: op] init: data];
-		[request execute: txn :port];
+		struct query *query = query_create(op, data);
+		query_execute(query, txn, port);
 		txn_commit(txn);
 	}
 	@catch (id e) {
