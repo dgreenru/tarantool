@@ -62,10 +62,12 @@ pool_take_worker(void (*handler)(void *), void *data)
 		/* Create a fiber itself. */
 		worker = fiber_create("worker", handler, data);
 		if (worker == NULL) {
-			say_error("can't create worker fiber");
+			say_error("Cannot create a worker fiber");
 			return NULL;
 		}
 	}
+
+	worker->flags &= ~FIBER_POOLED;
 
 	return worker;
 }
@@ -73,7 +75,17 @@ pool_take_worker(void (*handler)(void *), void *data)
 static void
 pool_drop_worker(struct fiber *worker)
 {
+	worker->flags |= FIBER_POOLED;
+
 	SLIST_INSERT_HEAD(&pool, worker, zombie_link);
+}
+
+static void
+pool_kill_worker(struct fiber *worker)
+{
+	if ((fiber->flags & FIBER_POOLED) != 0) {
+		SLIST_REMOVE(&pool, worker, fiber, zombie_link);
+	}
 }
 
 /* }}} */
@@ -425,14 +437,19 @@ batch_process_all(void)
 static void
 batch_worker(void *dummy __attribute__((unused)))
 {
-	for (;;) {
-		batch_process_all();
+	@try {
+		for (;;) {
+			batch_process_all();
 
-		pool_drop_worker(fiber);
+			pool_drop_worker(fiber);
 
-		fiber_gc();
-		fiber_yield();
-		fiber_testcancel();
+			fiber_gc();
+			fiber_yield();
+			fiber_testcancel();
+		}
+	}
+	@finally {
+		pool_kill_worker(fiber);
 	}
 }
 
