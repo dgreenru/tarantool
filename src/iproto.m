@@ -315,7 +315,8 @@ struct batch
 	IProtoConnection *conn;
 	struct palloc_pool *pool;
 	struct vbuf outbuf;
-	int outoff;
+	int outbuf_start;
+	int outbuf_count;
 
 	TAILQ_ENTRY(batch) link;
 
@@ -377,6 +378,8 @@ batch_process_msg(struct batch *batch)
 			reply->len += iovec(&batch->outbuf)[saved_iov_cnt].iov_len;
 		}
 	}
+
+	batch->outbuf_count = batch->outbuf.iov_cnt - batch->outbuf_start;
 }
 
 static void
@@ -506,18 +509,19 @@ batch_output_handler(ev_io *watcher, int revents __attribute__((unused)))
 	struct vbuf *vbuf = &batch->outbuf;
 
 	@try {
-		if (batch->outoff < vbuf->iov_cnt) {
+		if (batch->outbuf_count) {
 			int n = sock_writev(conn->fd,
-					    iovec(vbuf) + batch->outoff,
-					    vbuf->iov_cnt - batch->outoff);
-			batch->outoff += n;
+					    iovec(vbuf) + batch->outbuf_start,
+					    batch->outbuf_count);
+			batch->outbuf_start += n;
+			batch->outbuf_count -= n;
 		}
-		if (batch->outoff == vbuf->iov_cnt) {
+		if (batch->outbuf_start == vbuf->iov_cnt) {
+			assert(batch->output_count == 0);
+			batch->outbuf_start = 0;
 			vbuf_clear(vbuf, true);
 			vbuf_ensure(&batch->outbuf, 1024);
-			batch->outoff = 0;
-
-#if 0
+#if 1
 			if (!batch->running && batch->inbuf->count == 0) {
 				conn_stop_output(conn);
 			}
