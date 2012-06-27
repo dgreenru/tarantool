@@ -324,11 +324,14 @@ inbuf_drop(struct inbuf *inbuf)
 struct batch
 {
 	struct inbuf *inbuf;
-	IProtoConnection *conn;
-	struct palloc_pool *pool;
+
 	struct vbuf outbuf;
 	int outbuf_start;
 	int outbuf_count;
+
+	struct palloc_pool *pool;
+
+	IProtoConnection *conn;
 
 	TAILQ_ENTRY(batch) link;
 
@@ -665,16 +668,6 @@ batch_init(void)
 - (io_handler) getOutputHandler
 {
 	return batch_output_handler;
-}
-
-- (void) process: (struct vbuf *)wbuf
-		:(uint32_t)msg_code
-		:(struct tbuf *)request
-{
-	(void) wbuf;
-	(void) msg_code;
-	(void) request;
-	[self subclassResponsibility: _cmd];
 }
 
 @end
