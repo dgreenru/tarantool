@@ -537,7 +537,7 @@ batch_output_handler(ev_io *watcher, int revents __attribute__((unused)))
 			batch->outbuf_count -= n;
 		}
 		if (batch->outbuf_start == vbuf->iov_cnt) {
-			assert(batch->output_count == 0);
+			assert(batch->outbuf_count == 0);
 			batch->outbuf_start = 0;
 			vbuf_clear(vbuf, true);
 			vbuf_ensure(&batch->outbuf, 1024);

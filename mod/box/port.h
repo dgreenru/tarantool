@@ -32,7 +32,7 @@
 #include <fiber.h>
 #include <palloc.h>
 #include <util.h>
-#include <objc/Object.h>
+#import "object.h"
 
 struct vbuf;
 struct tuple;

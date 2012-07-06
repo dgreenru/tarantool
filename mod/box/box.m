@@ -89,10 +89,9 @@ box_process_rw(struct txn *txn, struct port *port,
 {
 	ev_tstamp start = ev_now(), stop;
 
-	stat_collect(stat_base, op, 1);
-
 	@try {
 		struct query *query = query_create(op, data);
+		stat_collect(stat_base, op, 1);
 		query_execute(query, txn, port);
 		txn_commit(txn);
 	}
@@ -604,6 +603,3 @@ mod_info(struct tbuf *out)
 	tbuf_printf(out, "  status: %s" CRLF, status);
 }
 
-/**
- * vim: foldmethod=marker
- */

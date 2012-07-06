@@ -40,6 +40,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <limits.h>
+#include <fcntl.h>
 
 #include "fiber.h"
 #include "recovery.h"
@@ -211,6 +212,8 @@ replication_relay_send_row(struct tbuf *t);
 		 ntohs(addr->sin_port));
 
 	sock_set_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
+	sock_set_blocking(fd, false);
+
 	ev_io_stop(&accept_event);
 	ev_io_start(&send_event);
 

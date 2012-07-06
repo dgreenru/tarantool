@@ -27,7 +27,6 @@
  * SUCH DAMAGE.
  */
 #include "request.h"
-#include <objc/runtime.h>
 #include "txn.h"
 #include "tuple.h"
 #include "index.h"
@@ -952,6 +951,3 @@ query_execute(struct query *query, struct txn *txn, struct port *port)
 	}
 }
 
-/**
- * vim: foldmethod=marker
- */

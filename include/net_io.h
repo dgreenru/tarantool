@@ -33,8 +33,7 @@
 #include <sock.h>
 #include <util.h>
 #include <tarantool_ev.h>
-
-#import <objc/Object.h>
+#include <object.h>
 
 #define SERVICE_NAME_MAXLEN 32
 
@@ -88,7 +87,7 @@ typedef void (*io_handler)(struct ev_io *watcher, int revents);
 /**
  * Generic Network Connection.
  */
-@interface Connection: Object {
+@interface Connection: tnt_Object {
 @public
 	int fd;
 	struct ev_io input;
@@ -161,7 +160,7 @@ void conn_detach_worker(CoConnection *conn);
 /**
  * Connection Acceptor
  */
-@interface Acceptor: Object <TimerHandler, InputHandler> {
+@interface Acceptor: tnt_Object <TimerHandler, InputHandler> {
 	int listen_fd;
 	struct ev_timer timer_event;
 	struct ev_io accept_event;

@@ -3,12 +3,21 @@
 #
 add_library(ev tarantool_ev.c)
 
-check_c_compiler_flag ("-Wno-unused-result" gcc_has_wno_unused_result)
-
-if (gcc_has_wno_unused_result)
-    set_source_files_properties(tarantool_ev.c
-        PROPERTIES COMPILE_FLAGS "-Wno-unused-result")
+if (CC_HAS_WNO_UNUSED_RESULT)
+    set (ev_flags "-Wno-unused-result")
 endif()
+if (CC_HAS_WNO_UNUSED_VALUE)
+    set (ev_flags "${ev_flags} -Wno-unused-value")
+endif()
+if(CMAKE_COMPILER_IS_CLANG)
+    set (ev_flags "${ev_flags} -Wno-comment")
+endif()
+if (CC_HAS_WNO_BITWISE_OP_PARENTHESES)
+    set (ev_flags "${ev_flags} -Wno-bitwise-op-parentheses")
+endif()
+set_source_files_properties(tarantool_ev.c
+    PROPERTIES COMPILE_FLAGS "${ev_flags}")
+unset (ev_flags)
 
 if (TARGET_OS_LINUX)
 #
@@ -19,10 +28,20 @@ elseif (TARGET_OS_FREEBSD)
 # On FreeBSD build libev loop on top of
   set_target_properties(ev PROPERTIES COMPILE_FLAGS "-DEV_USE_KQUEUE")
 endif()
+
 #
 # libev uses ceil and floor from the standard math library
 #
-target_link_libraries(ev m)
+
+#
+# libev depends on librt under kFreeBSD
+if (TARGET_OS_DEBIAN_FREEBSD)
+  set (ev_libs m rt)
+else()
+  set (ev_libs m)
+endif()
+
+target_link_libraries(ev ${ev_libs})
 
 #
 # Build admin.m from admin.rl, but only if admin.rl was changed.
@@ -62,46 +81,45 @@ set (recompiled_sources
 
 set (common_sources tbuf.m vbuf.m palloc.m util.m sock.m net_io.m
      salloc.m pickle.m coro.m stat.m log_io.m recovery.m cpu_feature.m
-     replica.m iproto.m exception.m errcode.c errinj.m latch.m
+     replica.m iproto.m object.m exception.m errcode.c errinj.m latch.m
      nio.c crc32.c)
 
 if (ENABLE_TRACE)
-  set (common_sources ${common_sources} trace.m)
+    set (common_sources ${common_sources} trace.m)
 endif()
 
 add_library(core STATIC ${common_sources})
-add_dependencies(core generate_headers luajit)
+add_dependencies(core generate_headers)
 set_target_properties(core PROPERTIES COMPILE_FLAGS "${core_cflags}")
 
-set (common_libraries cfg core ev coro gopt misc objc)
+set (common_libraries cfg core ev coro gopt misc)
 
 set (THREAD_LIB pthread)
 if (ENABLE_STATIC)
     set (THREAD_LIB -Wl,--whole-archive pthread -Wl,--no-whole-archive)
 endif()
 
-set (common_libraries ${common_libraries} ${LUAJIT_LIB} ${THREAD_LIB})
+set (common_libraries ${common_libraries} ${LUAJIT_LIB} ${LIBOBJC_LIB} ${THREAD_LIB})
 
-if (TARGET_OS_LINUX)
-  set (common_libraries ${common_libraries} dl)
-endif()
-
-if (TARGET_OS_DEBIAN_FREEBSD)
-  set (common_libraries ${common_libraries} dl)
+if (TARGET_OS_LINUX OR TARGET_OS_DEBIAN_FREEBSD)
+    set (common_libraries ${common_libraries} dl)
 endif()
 
 if (ENABLE_GCOV)
-  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${GCOV_C_FLAGS}")
-  set (LDFLAGS "${LDFLAGS} ${GCOV_LDFLAGS}")
-  set (common_libraries ${common_libraries} gcov)
+    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${GCOV_C_FLAGS}")
+    set (LDFLAGS "${LDFLAGS} ${GCOV_LDFLAGS}")
+    set (common_libraries ${common_libraries} gcov)
 endif()
 
 if (ENABLE_BACKTRACE AND HAVE_BFD)
-  set (common_libraries ${common_libraries} bfd iberty)
-  if (ENABLE_STATIC OR TARGET_OS_FREEBSD)
-     include (FindZLIB)
-     set (common_libraries ${common_libraries} ${ZLIB_LIBRARIES})
-  endif()
+    set (common_libraries ${common_libraries} bfd)
+    if (NOT TARGET_OS_DARWIN)
+        set (common_libraries ${common_libraries} iberty)
+    endif()
+    if (ENABLE_STATIC OR TARGET_OS_FREEBSD)
+        include (FindZLIB)
+        set (common_libraries ${common_libraries} ${ZLIB_LIBRARIES})
+    endif()
 endif()
 
 set (common_libraries ${common_libraries} PARENT_SCOPE) 

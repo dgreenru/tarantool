@@ -31,6 +31,7 @@
 #include <sock.h>
 #include <tarantool.h>
 
+#include <stdio.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
@@ -268,6 +269,7 @@ conn_detach_worker(CoConnection *conn)
 
 + (CoConnection *) connect: (struct sockaddr_in *)addr
 {
+	CoConnection *conn = nil;
 	int fd = sock_create();
 	@try {
 		sock_set_blocking(fd, false);
@@ -281,16 +283,16 @@ conn_detach_worker(CoConnection *conn)
 			sock_connect_inprogress(fd);
 		}
 
-		CoConnection *conn = [CoConnection alloc];
+		conn = [CoConnection alloc];
 		[conn init: fd];
 		[conn initInputHandler: conn_default_handler];
 		[conn initOutputHandler: conn_default_handler];
-		return conn;
 	}
 	@catch (id) {
 		close(fd);
 		@throw;
 	}
+	return conn;
 }
 
 - (void) close

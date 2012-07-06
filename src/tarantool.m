@@ -446,6 +446,13 @@ error:
 void
 tarantool_free(void)
 {
+	/*
+	 * Got to be done prior to anything else, since GC 
+	 * handlers can refer to other subsystems (e.g. fibers).
+	 */
+	if (tarantool_L)
+		tarantool_lua_close(tarantool_L);
+
 	recovery_free();
 	stat_free();
 
@@ -469,8 +476,6 @@ tarantool_free(void)
 #ifdef HAVE_BFD
 	symbols_free();
 #endif
-	if (tarantool_L)
-		tarantool_lua_close(tarantool_L);
 }
 
 int
@@ -569,7 +574,8 @@ main(int argc, char **argv)
 		printf("Tarantool/%s %s\n", mod_name, tarantool_version());
 		printf("Target: %s\n", BUILD_INFO);
 		printf("Build options: %s\n", BUILD_OPTIONS);
-		printf("CFLAGS:%s\n", BUILD_CFLAGS);
+		printf("Compiler: %s\n", COMPILER_INFO);
+		printf("CFLAGS:%s\n", COMPILER_CFLAGS);
 		return 0;
 	}
 

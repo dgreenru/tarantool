@@ -1,3 +1,36 @@
+tarantool (1.4.6+20120629+2158-1) unstable; urgency=low
+
+  * Some fixes for Objective C 2.0.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Fri, 29 Jun 2012 21:58:42 +0400
+
+tarantool (1.4.6+20120629+2112-1) unstable; urgency=low
+
+  * Package is built by gcc-4.7.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Fri, 29 Jun 2012 21:11:30 +0400
+
+tarantool (1.4.6+20120629+2105-1) unstable; urgency=low
+
+  * Really fixed FTBFS with BSD (#679317).
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Fri, 29 Jun 2012 21:05:21 +0400
+
+tarantool (1.4.6+20120629-1) unstable; urgency=low
+
+  * New upstream version: fixed FTBFS with Debian/kFreeBSD. closes: #679317.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Fri, 29 Jun 2012 17:26:03 +0400
+
+tarantool (1.4.6+20120626-1) unstable; urgency=low
+
+  * New upstream version.
+  * Add libtarantoolrpl package: (replication protocol).
+  * Fixed segfaults by adminport.
+  * Upstream added some checks for requests, closes: #672327.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Tue, 26 Jun 2012 15:30:02 +0400
+
 tarantool (1.4.6+20120524-1) unstable; urgency=low
 
   * Fix version number.

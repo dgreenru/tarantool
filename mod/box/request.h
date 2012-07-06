@@ -28,7 +28,7 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#include <objc/Object.h>
+#import "object.h"
 #include <util.h>
 #include <tbuf.h>
 #include <iproto.h>

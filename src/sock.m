@@ -32,6 +32,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -211,7 +212,7 @@ int
 sock_accept(int sockfd, struct sockaddr_in *addr, socklen_t *addrlen)
 {
 	/* Accept a connection. */
-	int fd = accept(sockfd, addr, addrlen);
+	int fd = accept(sockfd, (struct sockaddr *) addr, addrlen);
 	if (fd < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			return -1;

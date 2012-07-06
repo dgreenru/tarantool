@@ -134,7 +134,7 @@ fiber_wakeup(struct fiber *f)
 void
 fiber_cancel(struct fiber *f)
 {
-	assert(fiber->fid != 0);
+	assert(f->fid != 0);
 	assert(!(f->flags & FIBER_CANCEL));
 
 	f->flags |= FIBER_CANCEL;
@@ -370,7 +370,7 @@ fiber_loop(void *data __attribute__((unused)))
 			say_info("fiber `%s': exiting", fiber->name);
 		}
 		@catch (id e) {
-			say_error("fiber `%s': exception `%s'", fiber->name, [e name]);
+			say_error("fiber `%s': exception `%s'", fiber->name, object_getClassName(e));
 			panic("fiber `%s': exiting", fiber->name);
 		}
 		fiber_zombificate();

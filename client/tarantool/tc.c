@@ -95,11 +95,14 @@ int main(int argc, char *argv[])
 {
 	tc_init();
 
-	int rc;
+	int rc = 0;
 	enum tc_opt_mode mode = tc_opt_init(&tc.opt, argc, argv);
 	switch (mode) {
 	case TC_OPT_USAGE:
 		tc_opt_usage();
+		break;
+	case TC_OPT_VERSION:
+		tc_opt_version();
 		break;
 	case TC_OPT_RPL:
 		tc_connect();
