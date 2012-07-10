@@ -91,9 +91,10 @@ box_process_rw(struct txn *txn, struct port *port,
 
 	@try {
 		struct query *query = query_create(op, data);
-		stat_collect(stat_base, op, 1);
 		query_execute(query, txn, port);
 		txn_commit(txn);
+
+		stat_collect(stat_base, op, 1);
 	}
 	@catch (id e) {
 		txn_rollback(txn);
