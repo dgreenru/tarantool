@@ -254,7 +254,7 @@ conn_default_handler(ev_io *watcher, int revents __attribute__((unused)))
 void
 conn_attach_worker(CoConnection *conn, struct fiber *worker)
 {
-	assert(worker == NULL && worker->peer == nil);
+	assert(conn->worker == NULL && worker->peer == nil);
 	conn->worker = worker;
 	conn->worker->peer = conn;
 }
