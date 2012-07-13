@@ -18,58 +18,25 @@ for every push into the stable branch. All binary packages contain
 symbol information. Additionally, **-debug-** 
 packages contain asserts and are compiled without optimization.
 
+#### Source tarball
+
+The latest source archive is
+<a href="http://tarantool.org/dist/tarantool-@TARANTOOL_VERSION@-src.tar.gz">tarantool-@TARANTOOL_VERSION@-src.tar.gz</a>.
+Please consult with README for build instructions on your system.
+
+### Binary downloads
+
 To simplify problem analysis and avoid various bugs induced 
 by compilation parameters and environment, it is recommended
 that production systems use the builds provided on this site.
-The latest build can be found below.
+
+#### RedHat, FreeBSD, Mac OS X
 
 <table border=1 title="Download the latest build, @TARANTOOL_VERSION@" width=100%> 
 
-  <tr width=60%>
-    <td colspan=1>Source tarball</td>
-    <td colspan=3 align=center>
-        <a href="http://tarantool.org/dist/tarantool-@TARANTOOL_VERSION@-src.tar.gz">tarantool-@TARANTOOL_VERSION@-src.tar.gz</a>
-    </td>
-  </tr>
-
-  <th colspan=3>Linux</th>
-
-<!-- Debian -->
-  <tr>
-    <td>
-        Debian (<b>.deb</b>)
-    </td>
-
-    <td align=center>
-        <a href="http://tarantool.org/dist/debian/binary-i386/tarantool_@TARANTOOL_VERSION@_i386.deb">32-bit</a>
-    </td>
-
-    <td align=center>
-        <a href="http://tarantool.org/dist/debian/binary-amd64/tarantool_@TARANTOOL_VERSION@_amd64.deb">64-bit</a>
-    </td>
-  </tr>
-
-  <tr>
-    <td>
-        Debian (<b>.deb</b>), with debug info 
-    </td>
-    <td align=center>
-        <a href="http://tarantool.org/dist/debian/binary-i386/tarantool-dbg_@TARANTOOL_VERSION@_i386.deb">32-bit</a>
-    </td>
-
-    <td align=center>
-        <a href="http://tarantool.org/dist/debian/binary-amd64/tarantool-dbg_@TARANTOOL_VERSION@_amd64.deb">64-bit</a>
-    </td>
-  </tr>
-
-  <tr>
-    <td>&nbsp</td>
-    <td align=center colspan=2>
-        <a href="http://tarantool.org/dist/debian/binary-i386/tarantool-common_@TARANTOOL_VERSION@_all.deb">common</a>
-    </td>
-  </tr>
-
 <!-- RPM -->
+
+  <th colspan=3>RedHat</th>
 
   <tr>
     <td>
@@ -102,6 +69,7 @@ The latest build can be found below.
   </tr>
 
 <!-- .tar.gz -->
+  <th colspan=3>Other Linux distributions</th>
 
   <tr>
     <td>
@@ -134,16 +102,35 @@ The latest build can be found below.
   </tr>
   <th colspan=4>Mac OS X</th>
   <tr> 
-    <td align=center colspan=4><i>Coming soon...</i></td>
+    <td align=center colspan=4>brew install http://tarantool.org/dist/tarantool.rb</td>
   <tr>
 
 </table>
 
-### All downloads
+#### Debian GNU/Linux and Ubuntu
 
-An archive of old releases can be found <a href="http://tarantool.org/dist">here</a>.
+We maintain an always up-to-date Debian GNU/Linux and Ubuntu package
+repository at <a
+href="http://tarantool.org/dist/debian">http://tarantoo.org/dist/debian</a> and <a
+href="http://tarantool.org/dist/ubuntu">http://tarantool.org/dist/ubuntu</a> respectively.
 
-### Connectors
+At the moment the repository contains builds for Debian "Sid", "Squeeze",
+"Wheezy" and Ubuntu "Precise". It can be added to your apt sources list with:
+
+    wget http://tarantool.org/dist/public.key
+    sudo apt-key add ./public.key
+    release=`lsb_release -c -s`
+    echo "deb http://tarantool.org/dist/debian/ $release main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
+    echo "deb-src http://tarantool.org/dist/debian/ $release main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
+    sudo apt-get update
+    sudo apt-get install tarantool tarantool-client
+
+#### All downloads
+
+An archive of old releases can be found at <a
+href="http://tarantool.org/dist">http://tarantool.org/dist</a>.
+
+#### Connectors
 
 - Perl driver, [CPAN home](http://search.cpan.org/~yuran/MR-Tarantool/)
 - [Ruby driver](https://github.com/mailru/tarantool-ruby)
@@ -170,63 +157,25 @@ Tarantool/Box использует стандартную схему нумер�
 
 Текущая стабильная версия **@TARANTOOL_VERSION@**.
 
-Для каждого изменения репозитория автоматически
-создаётся, тестируется и публикуется набор пакетов
-для всех поддерживаемых операционных систем и оборудования.
-Все пакеты содержат информацию, необходимую для 
-аварийной отладки. Пакеты с суффиксом **-debug-** 
-скомпилированы без оптимзации и содержат отладочные
-проверки.
+#### Исходный код 
+
+Архив .tar.gz с последний версией исходного кода доступен по следующей
+ссылке: 
+<a href="http://tarantool.org/dist/tarantool-@TARANTOOL_VERSION@-src.tar.gz">tarantool-@TARANTOOL_VERSION@-src.tar.gz</a>.
+Файл README.<OS> содержит инструкции по сборке из исходников.
+
+### Бинарные пакеты 
 
 Для использования в высоконагруженных проектах
 рекомендуются пакеты, опубликованные на этом сайте.
 
-Последний стабильный релиз представлен в таблице:
+#### RedHat, FreeBSD, Mac OS X
 
 <table border=1 title="Download the latest build, @TARANTOOL_VERSION@" width=100%> 
 
-  <tr width=60%>
-    <td colspan=1>Source tarball</td>
-    <td colspan=3 align=center>
-        <a href="http://tarantool.org/dist/tarantool-@TARANTOOL_VERSION@-src.tar.gz">tarantool-@TARANTOOL_VERSION@-src.tar.gz</a>
-    </td>
-  </tr>
-
-  <th colspan=3>Linux</th>
-
-<!-- Debian -->
-<!--
-
-  <tr>
-    <td>
-        Debian software package (<b>.deb</b>)
-    </td>
-
-    <td align=center>
-        <a href="http://tarantool.org/dist/tarantool-@TARANTOOL_VERSION@-linux-i686.deb">32-bit</a>
-    </td>
-
-    <td align=center>
-        <a href="http://tarantool.org/dist/tarantool-@TARANTOOL_VERSION@-linux-i686.deb">64-bit</a>
-    </td>
-  </tr>
-
-  <tr>
-    <td>
-        Debian software package (<b>.deb</b>), with debug info 
-    </td>
-    <td align=center>
-        <a
-        href="http://tarantool.org/dist/tarantool-@TARANTOOL_VERSION@-linux-i686-debug.deb">32-bit</a>
-    </td>
-
-    <td align=center>
-        <a
-        href="http://tarantool.org/dist/tarantool-@TARANTOOL_VERSION@-linux-x86_64-debug.deb">64-bit</a>
-    </td>
-  </tr>
--->
 <!-- RPM -->
+
+  <th colspan=3>RedHat</th>
 
   <tr>
     <td>
@@ -259,6 +208,7 @@ Tarantool/Box использует стандартную схему нумер�
   </tr>
 
 <!-- .tar.gz -->
+  <th colspan=3>Other Linux distributions</th>
 
   <tr>
     <td>
@@ -291,15 +241,35 @@ Tarantool/Box использует стандартную схему нумер�
   </tr>
   <th colspan=4>Mac OS X</th>
   <tr> 
-    <td align=center colspan=4><i>Coming soon...</i></td>
+    <td align=center colspan=4>brew install http://tarantool.org/dist/tarantool.rb</td>
   <tr>
 
 </table>
 
+#### Debian GNU/Linux and Ubuntu
+
+Мы поддерживаем собственные репозитории .deb пакетов, который
+содержит последние версии сервера и клиентских библиотек для 
+*Debian GNU/Linux* и  *Ubuntu*:
+<a href="http://tarantool.org/dist/debian">http://tarantoo.org/dist/debian</a>,
+<a href="http://tarantool.org/dist/ubuntu">http://tarantool.org/dist/ubuntu</a>.
+
+Репозитории содержат пакеты для Debian "Sid", "Squeeze",
+"Wheezy" и Ubuntu "Precise". Для установки можно воспользоваться следующим
+скриптом:
+
+    wget http://tarantool.org/dist/public.key
+    sudo apt-key add ./public.key
+    release=`lsb_release -c -s`
+    echo "deb http://tarantool.org/dist/debian/ $release main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
+    echo "deb-src http://tarantool.org/dist/debian/ $release main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
+    sudo apt-get update
+    sudo apt-get install tarantool tarantool-client
+
 ### Архив старых релизов
 
-Архив старых релизов находится <a
-href="http://tarantool.org/dist">здесь</a>.
+Архив старых релизов доступен по адресу <a
+href="http://tarantool.org/dist">http://tarantool.org/dist</a>.
 
 ### Доступ из языков программирования
 
