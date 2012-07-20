@@ -81,4 +81,18 @@ inline static u32 load_varint32(void **data)
 	return 0;
 }
 
+static inline size_t
+field_size(void *data)
+{
+	void *tmp = data;
+	return load_varint32(&tmp);
+}
+
+static inline size_t
+field_full_size(void *data)
+{
+	size_t size = load_varint32(&data);
+	return size + varint32_sizeof(size);
+}
+
 #endif /* TARANTOOL_PICKLE_H_INCLUDED */

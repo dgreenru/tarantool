@@ -33,10 +33,12 @@
 #include "space.h"
 #include "port.h"
 #include "box_lua.h"
+
 #include <errinj.h>
 #include <tbuf.h>
 #include <pickle.h>
 #include <fiber.h>
+#include <crope.h>
 
 STRS(requests, REQUESTS);
 STRS(update_op_codes, UPDATE_OP_CODES);
@@ -146,266 +148,477 @@ port_send_tuple(u32 flags, Port *port, struct tuple *tuple)
  * complications  are worked around.
  */
 
+
+/* ========================================================================= *
+ * UPDATE command declaration
+ * ========================================================================= */
+
 @interface Update: Request
 - (void) execute: (struct txn *) txn :(Port *) port;
 @end
 
-/** Argument of SET operation. */
-struct op_set_arg {
-	u32 length;
-	void *value;
-};
+
+/* ========================================================================= *
+ * UPDATE command support structures
+ * ========================================================================= */
 
 /** Argument of ADD, AND, XOR, OR operations. */
 struct op_arith_arg {
-	u32 val_size;
+	/** Size of argument. */
+	u32 size;
 	union {
+		/** Double word argument. */
 		i32 i32_val;
+		/** Quad word argument. */
 		i64 i64_val;
 	};
 };
 
 /** Argument of SPLICE. */
 struct op_splice_arg {
-	i32 offset;	/** splice position */
-	i32 cut_length; /** cut this many bytes. */
-	void *paste;      /** paste what? */
-	i32 paste_length; /** paste this many bytes. */
-
-	/** Inferred data */
-	i32 tail_offset;
-	i32 tail_length;
+	/** Cut position. */
+	i32 offset;
+	/** Cut length. */
+	i32 cut;
+	/** Paste string. */
+	void *paste;
+	/** Paste string length. */
+	i32 paste_length;
 };
 
-union update_op_arg {
-	struct op_set_arg set;
-	struct op_arith_arg arith;
-	struct op_splice_arg splice;
-};
-
-struct update_cmd;
-struct update_field;
-struct update_op;
-
-typedef void (*init_op_func)(struct update_cmd *cmd,
-			     struct update_field *field,
-			     struct update_op *op);
-typedef void (*do_op_func)(union update_op_arg *arg, void *in, void *out);
-
-/** A set of functions and properties to initialize and do an op. */
-struct update_op_meta {
-	init_op_func init_op;
-	do_op_func do_op;
-	bool works_in_place;
-};
-
-/** A single UPDATE operation. */
+/** UPDATE operation context. */
 struct update_op {
-	struct update_op_meta *meta;
-	union update_op_arg arg;
+	/** Operations list. */
+	STAILQ_ENTRY(update_op) op_list_entry;
+	/** Field number which operation is applied. */
 	u32 field_no;
-	u32 new_field_len;
+	/** Operation code. */
 	u8 opcode;
+	/** Operation arguments. */
+	union {
+		/** Raw operation argument. */
+		void *raw;
+		/** Arithmetic operation argument. */
+		struct op_arith_arg arith;
+		/** Splice operation argument. */
+		struct op_splice_arg splice;
+	} arg;
 };
 
-/**
- * We can have more than one operation on the same field.
- * A descriptor of one changed field.
- */
-struct update_field {
-	/** Pointer to the first operation on this field. */
-	struct update_op *first;
-	/** Points after the last operation on this field. */
-	struct update_op *end;
-	/** Points at start of field *data* in the old tuple. */
-	void *old;
-	/** The final length of the new field. */
-	u32 new_len;
-	/** End of the old field. */
-	void *tail;
-	/** Copy old data after this field. */
-	u32 tail_len;
-	/** How many fields we're copying. */
-	int tail_field_count;
+/* List of the update commands. */
+STAILQ_HEAD(op_list, update_op);
+
+/** UPDATE command rope entry. */
+struct rope_fields {
+	/** Fields data. */
+	void *data;
+	/** Full fields size (w/ field length prefixes). */
+	size_t size;
+	/** Estimated size of fields after updates (w/o field length prefix). */
+	size_t estimated_size;
+	/**
+	 * Maximal estimated size of fields after updates (w/o field length
+	 * prefix).
+	 */
+	size_t max_estimated_size;
+	/** List of UPDATE operations applied to the field. */
+	struct op_list op_list;
 };
+
+/** A tuple presentation as rope */
+crope_decl_struct(tuple, struct rope_fields, struct palloc_pool)
 
 /** UPDATE command context. */
 struct update_cmd {
-	/** Search key */
+	/** Space. */
+	struct space *sp;
+	/** Command flags. */
+	u32 flags;
+	/** Search key. */
 	void *key;
 	/** Search key part count. */
 	u32 key_part_count;
-	/** Operations. */
-	struct update_op *op;
-	struct update_op *op_end;
-	/* Distinct fields affected by UPDATE. */
-	struct update_field *field;
-	struct update_field *field_end;
-	/** new tuple length after all operations are applied. */
-	u32 new_tuple_len;
-	u32 new_field_count;
+	/** Number of operations */
+	size_t op_cnt;
+	/** Array of operations. */
+	struct update_op *op_buf;
+	/** Updated tuple. */
+	struct tuple *old_tuple;
 };
 
-static int
-update_op_cmp(const void *op1_ptr, const void *op2_ptr)
-{
-	const struct update_op *op1 = op1_ptr;
-	const struct update_op *op2 = op2_ptr;
 
-	/* Compare operations by field number. */
-	int result = (int) op1->field_no - (int) op2->field_no;
-	if (result)
-		return result;
-	/*
-	 * INSERT operations create a new field
-	 * at index field_no, shifting other fields to the right.
-	 * Operations on field_no are done on the field
-	 * in the old tuple and do not affect the inserted
-	 * field. Therefore, field insertion should be
-	 * done first, followed by all other operations
-	 * on the given field_no.
-	 */
-	result = (op2->opcode == UPDATE_OP_INSERT) -
-		(op1->opcode == UPDATE_OP_INSERT);
-	if (result)
-		return result;
-	/*
-	 * We end up here in two cases:
-	 *   1) both operations are INSERTs,
-	 *   2) both operations are not INSERTs.
-	 *
-	 * Preserve the original order of operations on the same
-	 * field. To do it, order them by their address in the
-	 * UPDATE request.
-	 *
-	 * The expression below should work even if sizeof(ptrdiff_t)
-	 * is greater than sizeof(int) because we presume that both
-	 * value addresses belong to the same UPDATE command buffer
-	 * and therefore their difference must be small enough to fit
-	 * into an int comfortably.
-	 */
-	return (int) (op1->arg.set.value - op2->arg.set.value);
-}
+/* ========================================================================= *
+ * UPDATE command support function declaration
+ * ========================================================================= */
 
+
+/* ------------------------------------------------------------------------- *
+ * UPDATE command functions declaration
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Initial read of update command. Unpack and record update operations. Do not
+ * do too much, since the subject tuple may not exist.
+ * @param data is a raw UPDATE command data.
+ * @return read update command, which has an update key and list of operations.
+ */
+static struct update_cmd *
+read_update_cmd(struct tbuf *data);
+
+/**
+ * Evaluate an update command.
+ * @param cmd is a UPDATE command context.
+ * @return a tuple which present as rope.
+ */
+static struct rope_tuple *
+eval_update_ops(struct update_cmd *cmd);
+
+/**
+ * Apply an update command.
+ * @param tuple is a tuple as a rope.
+ * @return an updated tuple.
+ */
+static struct tuple *
+apply_update_ops(struct rope_tuple *tuple);
+
+
+/* ------------------------------------------------------------------------- *
+ * UPDATE tuple evaluate functions declaration
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Evaluate an UPDATE assign operation.
+ * @param tuple is a tuple as a rope.
+ * @param op is evaluating operation.
+ */
+static inline void
+eval_update_op_assign(struct rope_tuple *tuple, struct update_op *op);
+
+/**
+ * Evaluate an UPDATE arithmetic operation.
+ * @param tuple is a tuple as a rope.
+ * @param op is an evaluating operation.
+ */
 static void
-do_update_op_set(struct op_set_arg *arg, void *in __attribute__((unused)),
-		 void *out)
-{
-	memcpy(out, arg->value, arg->length);
-}
+eval_update_op_arith(struct rope_tuple *tuple, struct update_op *op);
 
+/**
+ * Evaluate an UPDATE splice operation.
+ * @param tuple is a tuple as a rope.
+ * @param op is an evaluating operation.
+ */
 static void
-do_update_op_add(struct op_arith_arg *arg, void *in, void *out)
+eval_update_op_splice(struct rope_tuple *tuple, struct update_op *op);
+
+/**
+ * Evaluate an UPDATE insert operation.
+ * @param tuple is a tuple as a rope.
+ * @param op is an evaluating operation.
+ */
+static void
+eval_update_op_insert(struct rope_tuple *tuple, struct update_op *op);
+
+/**
+ * Evaluate an UPDATE delete operation.
+ * @param tuple is a tuple as a rope.
+ * @param op is an evaluating operation.
+ */
+static void
+eval_update_op_delete(struct rope_tuple *tuple, struct update_op *op);
+
+/**
+ * Evaluate a field number for an operation.
+ * @param tuple is a tuple as a rope.
+ * @param op is an evaluating operation.
+ * @return field number.
+ */
+static inline size_t
+eval_update_op_field_no(struct rope_tuple *tuple, struct update_op *op);
+
+/**
+ * Evaluate a field number for an insert operation.
+ * @param tuple is a tuple as a rope.
+ * @param op is an evaluating operation.
+ * @return field number.
+ */
+static inline size_t
+eval_update_op_field_no_ins(struct rope_tuple *tuple, struct update_op *op);
+
+
+/* ------------------------------------------------------------------------- *
+ * UPDATE tuple apply functions declaration
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Apply an UPDATE arithmetic operation.
+ * @param field is a field of a tuple.
+ */
+static void
+apply_update_op_list(struct rope_fields *field);
+
+/**
+ * Apply an UPDATE arithmetic operation.
+ * @param field is a field of a tuple.
+ * @param op is an evaluating operation.
+ */
+static void
+apply_update_op_arith(struct rope_fields *field, struct update_op *op);
+
+/**
+ * Evaluate an UPDATE splice operation.
+ * @param field is a field of a tuple.
+ * @param op is an evaluating operation.
+ */
+static void
+apply_update_op_splice(struct rope_fields *field, struct update_op *op);
+
+
+/* ------------------------------------------------------------------------- *
+ * UPDATE tuple rope functions declaration
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Create a new rope_tuple entry from raw buffer.
+ * @param data is fields data.
+ * @param size is fields data size.
+ * @return an entry which has a tuple.
+ */
+static inline struct rope_fields *
+rope_fields_new(void *data, size_t size);
+
+/**
+ * Create a new rope_tuple entry from a tuple.
+ * @param tuple is a tuple.
+ * @return an entry which has a tuple.
+ */
+static inline struct rope_fields *
+rope_fields_new_tuple(struct tuple *tuple);
+
+/**
+ * Split a rope entry on two parts. Head has elements from 0 to pos and tail
+ * has elements from pos + 1 to n, where n is number elements in the rope
+ * entry.
+ * @param entry is a rope entry.
+ * @param pos is a split position.
+ * @return tail rope entry.
+ */
+static inline struct rope_fields *
+rope_fields_split(struct rope_fields *entry, size_t pos);
+
+/**
+ * Print a rope entry (stub function).
+ */
+static inline void
+rope_fields_print(struct rope_fields *entry, size_t size);
+
+/**
+ * Free a rope entry (stub function).
+ */
+static inline void
+rope_fields_free(struct palloc_pool *pool, void *ptr);
+
+/* A tuple presentation as rope */
+crope_decl_fun(tuple, struct rope_fields, struct palloc_pool)
+
+
+/* ------------------------------------------------------------------------- *
+ * UPDATE command functions definition
+ * ------------------------------------------------------------------------- */
+
+static struct update_cmd *
+read_update_cmd(struct tbuf *data)
 {
-	switch (arg->val_size) {
-	case sizeof(i32):
-		*(i32 *)out = *(i32 *)in + arg->i32_val;
-		break;
-	case sizeof(i64):
-		*(i64 *)out = *(i64 *)in + arg->i64_val;
-		break;
+	struct update_cmd *cmd = palloc(fiber->gc_pool,
+					sizeof(struct update_cmd));
+	cmd->sp = read_space(data);
+	cmd->flags = read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
+
+	read_key(data, &cmd->key, &cmd->key_part_count);
+
+	/* Read number of operations. */
+	cmd->op_cnt = read_u32(data);
+	if (cmd->op_cnt > BOX_UPDATE_OP_CNT_MAX)
+		tnt_raise(ClientError, :ER_UPDATE_TOO_MANY_OPS, cmd->op_cnt);
+	if (cmd->op_cnt == 0)
+		tnt_raise(ClientError, :ER_UPDATE_NO_OPS);
+
+	/* Read operations. */
+	cmd->op_buf = palloc(fiber->gc_pool, (cmd->op_cnt + 1) *
+			     sizeof(struct update_op));
+	const struct update_op *op_end = cmd->op_buf + cmd->op_cnt;
+	for (struct update_op *op = cmd->op_buf; op < op_end; ++op) {
+		op->field_no = read_u32(data);
+		op->opcode = read_u8(data);
+		op->arg.raw = read_field(data);
 	}
+
+	/* Try to find a tuple which satisfy the key. */
+	cmd->old_tuple = [cmd->sp->index[0] findByKey :cmd->key
+						      :cmd->key_part_count];
+	return cmd;
 }
 
-static void
-do_update_op_and(struct op_arith_arg *arg, void *in, void *out)
+static struct rope_tuple *
+eval_update_ops(struct update_cmd *cmd)
 {
-	switch (arg->val_size) {
-	case sizeof(i32):
-		*(i32 *)out = *(i32 *)in & arg->i32_val;
-		break;
-	case sizeof(i64):
-		*(i64 *)out = *(i64 *)in & arg->i64_val;
-		break;
-	}
-}
+	/* Wrap tuple to rope. */
+	struct rope_fields *fields = rope_fields_new_tuple(cmd->old_tuple);
+	struct rope_tuple *tuple = rope_tuple_new(fields,
+						  cmd->old_tuple->field_count,
+						  fiber->gc_pool);
 
-static void
-do_update_op_xor(struct op_arith_arg *arg, void *in, void *out)
-{
-	switch (arg->val_size) {
-	case sizeof(i32):
-		*(i32 *)out = *(i32 *)in ^ arg->i32_val;
-		break;
-	case sizeof(i64):
-		*(i64 *)out = *(i64 *)in ^ arg->i64_val;
-		break;
-	}
-}
-
-static void
-do_update_op_or(struct op_arith_arg *arg, void *in, void *out)
-{
-	switch (arg->val_size) {
-	case sizeof(i32):
-		*(i32 *)out = *(i32 *)in | arg->i32_val;
-		break;
-	case sizeof(i64):
-		*(i64 *)out = *(i64 *)in | arg->i64_val;
-		break;
-	}
-}
-
-static void
-do_update_op_splice(struct op_splice_arg *arg, void *in, void *out)
-{
-	memcpy(out, in, arg->offset);           /* copy field head. */
-	out += arg->offset;
-	memcpy(out, arg->paste, arg->paste_length); /* copy the paste */
-	out += arg->paste_length;
-	memcpy(out, in + arg->tail_offset, arg->tail_length); /* copy tail */
-}
-
-static void
-do_update_op_insert(struct op_set_arg *arg, void *in __attribute__((unused)),
-		 void *out)
-{
-	memcpy(out, arg->value, arg->length);
-}
-
-static void
-do_update_op_none(struct op_set_arg *arg, void *in, void *out)
-{
-	memcpy(out, in, arg->length);
-}
-
-static void
-init_update_op_set(struct update_cmd *cmd __attribute__((unused)),
-		   struct update_field *field, struct update_op *op)
-{
-	/* Skip all previous ops. */
-	field->first = op;
-	op->new_field_len = op->arg.set.length;
-}
-
-static void
-init_update_op_arith(struct update_cmd *cmd __attribute__((unused)),
-		     struct update_field *field, struct update_op *op)
-{
-	struct op_arith_arg *arg = &op->arg.arith;
-
-	switch (field->new_len) {
-	case sizeof(i32):
-		/* 32-bit operation */
-
-		/* Check the operand type. */
-		if (op->arg.set.length != sizeof(i32))
-			tnt_raise(ClientError, :ER_ARG_TYPE,
-				  "32-bit int");
-
-		arg->i32_val = *(i32 *)op->arg.set.value;
-		break;
-	case sizeof(i64):
-		/* 64-bit operation */
-		switch (op->arg.set.length) {
-		case sizeof(i32):
-			/* 32-bit operand */
-			/* cast 32-bit operand to 64-bit */
-			arg->i64_val = *(i32 *)op->arg.set.value;
+	/* Evaluate operation. */
+	const struct update_op *op_end = cmd->op_buf + cmd->op_cnt;
+	for (struct update_op *op = cmd->op_buf; op < op_end; ++op) {
+		switch (op->opcode) {
+		case UPDATE_OP_SET:
+			eval_update_op_assign(tuple, op);
 			break;
-		case sizeof(i64):
-			/* 64-bit operand */
-			arg->i64_val = *(i64 *)op->arg.set.value;
+		case UPDATE_OP_ADD:
+		case UPDATE_OP_AND:
+		case UPDATE_OP_XOR:
+		case UPDATE_OP_OR:
+			eval_update_op_arith(tuple, op);
+			break;
+		case UPDATE_OP_SPLICE:
+			eval_update_op_splice(tuple, op);
+			break;
+		case UPDATE_OP_INSERT:
+			eval_update_op_insert(tuple, op);
+			break;
+		case UPDATE_OP_DELETE:
+			eval_update_op_delete(tuple, op);
+			break;
+		}
+	}
+
+	return tuple;
+}
+
+static struct tuple *
+apply_update_ops(struct rope_tuple *rope)
+{
+	/* Checking, has the tuple got fields? */
+	if (rope->size == 0)
+		/* The tuple's got no fields. */
+		tnt_raise(ClientError, :ER_UPDATE_TUPLE_IS_EMPTY);
+
+	size_t tuple_size = 0;
+	crope_foreach(tuple, rope, iter) {
+		struct rope_fields *field = rope_tuple_iter_value(iter)->data;
+		if (!STAILQ_EMPTY(&field->op_list)) {
+			/*
+			 * Mutable field. The field's got mutable operations
+			 * which should be applied.
+			 */
+			apply_update_op_list(field);
+			/* Mutable field keeps data w/o field size prefix. */
+			tuple_size += varint32_sizeof(field->size) +
+				field->size;
+		} else {
+			/* Immutable fields. Just get fields size as is. */
+			tuple_size += field->size;
+		}
+	}
+
+	/* Write a new tuple. */
+	struct tuple *tuple = tuple_alloc(tuple_size);
+	void *tuple_data_ptr = tuple->data;
+	tuple->field_count = 0;
+
+	crope_foreach(tuple, rope, iter) {
+		struct rope_tuple_leaf *leaf = rope_tuple_iter_value(iter);
+		/* */
+		tuple->field_count += leaf->size;
+
+		struct rope_fields *field = leaf->data;
+		if (!STAILQ_EMPTY(&field->op_list)) {
+			/* Mutable field. */
+			/* Copy field size. */
+			tuple_data_ptr = save_varint32(tuple_data_ptr,
+						       field->size);
+			/* Copy field data. */
+			memcpy(tuple_data_ptr, field->data, field->size);
+			tuple_data_ptr += field->size;
+		} else {
+			/* Immutable fields. Just copy fields as is. */
+			memcpy(tuple_data_ptr, field->data, field->size);
+			tuple_data_ptr += field->size;
+		}
+	}
+
+	return tuple;
+}
+
+
+/* ------------------------------------------------------------------------- *
+ * UPDATE tuple evaluate functions declaration
+ * ------------------------------------------------------------------------- */
+
+static void
+eval_update_op_assign(struct rope_tuple *tuple, struct update_op *op)
+{
+	size_t field_no = eval_update_op_field_no(tuple, op);
+	struct rope_fields *field = rope_tuple_extract(tuple, field_no);
+
+	field->data = op->arg.raw;
+	field->size = field_full_size(op->arg.raw);
+	/*
+	 * Clean previous operation list, because any operation before assign
+	 * is useless.
+	 */
+	STAILQ_INIT(&field->op_list);
+}
+
+static void
+eval_update_op_arith(struct rope_tuple *tuple, struct update_op *op)
+{
+	/* Get field number. */
+	size_t field_no = eval_update_op_field_no(tuple, op);
+	/* Extract field from the rope. */
+	struct rope_fields *field = rope_tuple_extract(tuple, field_no);
+
+	/* Checking, is it the first mutable operation under the field. */
+	if (STAILQ_EMPTY(&field->op_list)) {
+		/*
+		 * We've got on operation under the field, we should, that's
+		 * why we should initialize
+		 */
+		field->estimated_size = field_size(field->data);
+		field->max_estimated_size = field->estimated_size;
+	}
+
+	/* Insert the operation to the field list. */
+	STAILQ_INSERT_TAIL(&field->op_list, op, op_list_entry);
+
+	/*
+	 * Parsing the arguments.
+	 */
+
+	/* Read arithmetic operand size */
+	void *arg = op->arg.raw;
+	op->arg.arith.size = load_varint32(&arg);
+
+	switch (field->estimated_size) {
+	case sizeof(int32_t):
+		/* 32-bit field. */
+		switch (op->arg.arith.size) {
+		case sizeof(int32_t):
+			op->arg.arith.i32_val = *(i32 *) arg;
+			break;
+		default:
+			tnt_raise(ClientError, :ER_ARG_TYPE, "32-bit int");
+		}
+		break;
+	case sizeof(int64_t):
+		/* 64-bit field. */
+		switch (op->arg.arith.size) {
+		case sizeof(int32_t):
+			/* cast 32-bit operand to the 64-bit. */
+			op->arg.arith.i64_val = *(int32_t *) arg;
+			break;
+		case sizeof(int64_t):
+			op->arg.arith.i64_val = *(int64_t *) arg;
 			break;
 		default:
 			tnt_raise(ClientError, :ER_ARG_TYPE,
@@ -413,440 +626,414 @@ init_update_op_arith(struct update_cmd *cmd __attribute__((unused)),
 		}
 		break;
 	default:
-		tnt_raise(ClientError, :ER_FIELD_TYPE,
-			  "32-bit or 64-bit int");
+		tnt_raise(ClientError, :ER_FIELD_TYPE, "32-bit or 64-bit int");
 	}
-	arg->val_size = op->new_field_len = field->new_len;
 }
 
 static void
-init_update_op_splice(struct update_cmd *cmd __attribute__((unused)),
-		      struct update_field *field, struct update_op *op)
+eval_update_op_splice(struct rope_tuple *tuple, struct update_op *op)
 {
-	u32 field_len = field->new_len;
+	/* Get field number. */
+	size_t field_no = eval_update_op_field_no(tuple, op);
+	/* Extract field from the rope. */
+	struct rope_fields *field = rope_tuple_extract(tuple, field_no);
+
+	/* Checking, is it the first mutable operation under the field. */
+	if (STAILQ_EMPTY(&field->op_list)) {
+		/*
+		 * We've got on operation under the field, we should, that's
+		 * why we should initialize
+		 */
+		field->estimated_size = field_size(field->data);
+		field->max_estimated_size = field->estimated_size;
+	}
+
+	/* Insert the operation to the field list. */
+	STAILQ_INSERT_TAIL(&field->op_list, op, op_list_entry);
+
+	/*
+	 * Parsing the arguments.
+	 */
+
+	/* Wrap the operands tuple to tbuf structure. */
+	void *arg = op->arg.raw;
+	u32 arg_size = load_varint32(&arg);
 	struct tbuf operands = {
-		.capacity = op->arg.set.length,
-		.size = op->arg.set.length,
-		.data = op->arg.set.value,
+		.capacity = arg_size,
+		.size = arg_size,
+		.data = arg,
 		.pool = NULL
 	};
-	struct op_splice_arg *arg = &op->arg.splice;
+
+	/*
+	 * Offset.
+	 */
 
 	/* Read the offset. */
 	void *offset_field = read_field(&operands);
-	u32 len = load_varint32(&offset_field);
-	if (len != sizeof(i32))
-		tnt_raise(IllegalParams, :"SPLICE offset");
-	/* Sic: overwrite of op->arg.set.length. */
-	arg->offset = *(i32 *)offset_field;
-	if (arg->offset < 0) {
-		if (-arg->offset > field_len)
+	arg_size = load_varint32(&offset_field);
+	if (arg_size != sizeof(i32))
+		tnt_raise(ClientError, :ER_SPLICE, "invalid offset parameter");
+	op->arg.splice.offset = *(i32 *) offset_field;
+
+	/* Validate the offset argument. */
+	if (op->arg.splice.offset < 0) {
+		/*
+		 * Negative offset operand. In this case the measured from the
+		 * end of the field.
+		 */
+		if (-op->arg.splice.offset > field->estimated_size)
+			/* Negative offset can't be out of bound. */
 			tnt_raise(ClientError, :ER_SPLICE,
 				  "offset is out of bound");
-		arg->offset += field_len;
-	} else if (arg->offset > field_len) {
-		arg->offset = field_len;
+
+		op->arg.splice.offset += field->estimated_size;
+	} else if (op->arg.splice.offset > field->estimated_size) {
+		/*
+		 * The positive offset is out of bound. In this case we set
+		 * the offset as end of field.
+		 */
+		op->arg.splice.offset = field->estimated_size;
 	}
-	assert(arg->offset >= 0 && arg->offset <= field_len);
+	assert(op->arg.splice.offset >= 0 &&
+	       op->arg.splice.offset <= field->estimated_size);
+
+	/*
+	 * Cut length.
+	 */
 
 	/* Read the cut length. */
-	void *length_field = read_field(&operands);
-	len = load_varint32(&length_field);
-	if (len != sizeof(i32))
-		tnt_raise(IllegalParams, :"SPLICE length");
-	arg->cut_length = *(i32 *)length_field;
-	if (arg->cut_length < 0) {
-		if (-arg->cut_length > (field_len - arg->offset))
-			arg->cut_length = 0;
-		else
-			arg->cut_length += field_len - arg->offset;
-	} else if (arg->cut_length > field_len - arg->offset) {
-		arg->cut_length = field_len - arg->offset;
-	}
+	void *cut_field = read_field(&operands);
+	arg_size = load_varint32(&cut_field);
+	if (arg_size != sizeof(i32))
+		tnt_raise(ClientError, :ER_SPLICE, "invalid length parameter");
 
-	/* Read the paste. */
-	void *paste_field = read_field(&operands);
-	arg->paste_length = load_varint32(&paste_field);
-	arg->paste = paste_field;
-
-	/* Fill tail part */
-	arg->tail_offset = arg->offset + arg->cut_length;
-	arg->tail_length = field_len - arg->tail_offset;
-
-	/* Check that the operands are fully read. */
-	if (operands.size != 0)
-		tnt_raise(IllegalParams, :"field splice format error");
-
-	/* Record the new field length. */
-	op->new_field_len = arg->offset + arg->paste_length + arg->tail_length;
-}
-
-static void
-init_update_op_delete(struct update_cmd *cmd,
-		      struct update_field *field, struct update_op *op)
-{
-	/*
-	 * Either DELETE is the last op on a field or next op
-	 * on this field is SET.
-	 */
-	if (op + 1 < cmd->op_end) {
-		struct update_op *next_op = op + 1;
-		if (next_op->field_no == op->field_no &&
-		    next_op->opcode != UPDATE_OP_SET &&
-		    next_op->opcode != UPDATE_OP_DELETE) {
-			tnt_raise(ClientError, :ER_NO_SUCH_FIELD,
-				  op->field_no);
-		}
-	}
-	/* Skip all ops on this field, including this one. */
-	field->first = op + 1;
-	op->new_field_len = 0;
-}
-
-static void
-init_update_op_insert(struct update_cmd *cmd __attribute__((unused)),
-		      struct update_field *field __attribute__((unused)),
-		      struct update_op *op)
-{
-	op->new_field_len = op->arg.set.length;
-}
-
-static void
-init_update_op_none(struct update_cmd *cmd __attribute__((unused)),
-		    struct update_field *field, struct update_op *op)
-{
-	op->new_field_len = op->arg.set.length = field->new_len;
-}
-
-static void
-init_update_op_error(struct update_cmd *cmd __attribute__((unused)),
-		     struct update_field *field __attribute__((unused)),
-		     struct update_op *op __attribute__((unused)))
-{
-	tnt_raise(ClientError, :ER_UNKNOWN_UPDATE_OP);
-}
-
-static struct update_op_meta update_op_meta[UPDATE_OP_MAX + 1] = {
-	{ init_update_op_set, (do_op_func) do_update_op_set, true },
-	{ init_update_op_arith, (do_op_func) do_update_op_add, true },
-	{ init_update_op_arith, (do_op_func) do_update_op_and, true },
-	{ init_update_op_arith, (do_op_func) do_update_op_xor, true },
-	{ init_update_op_arith, (do_op_func) do_update_op_or, true },
-	{ init_update_op_splice, (do_op_func) do_update_op_splice, false },
-	{ init_update_op_delete, (do_op_func) NULL, true },
-	{ init_update_op_insert, (do_op_func) do_update_op_insert, true },
-	{ init_update_op_none, (do_op_func) do_update_op_none, false },
-	{ init_update_op_error, (do_op_func) NULL, true }
-};
-
-/**
- * Initial parse of update command. Unpack and record
- * update operations. Do not do too much, since the subject
- * tuple may not exist.
- */
-static struct update_cmd *
-parse_update_cmd(struct tbuf *data)
-{
-	struct update_cmd *cmd = palloc(fiber->gc_pool,
-					sizeof(struct update_cmd));
-
-	read_key(data, &cmd->key, &cmd->key_part_count);
-	/* number of operations */
-	u32 op_cnt = read_u32(data);
-	if (op_cnt > BOX_UPDATE_OP_CNT_MAX)
-		tnt_raise(IllegalParams, :"too many operations for update");
-	if (op_cnt == 0)
-		tnt_raise(IllegalParams, :"no operations for update");
-	/*
-	 * Read update operations. Allocate an extra dummy op to
-	 * optionally "apply" to the first field.
-	 */
-	struct update_op *op = palloc(fiber->gc_pool, (op_cnt + 1) *
-				      sizeof(struct update_op));
-	cmd->op = ++op; /* Skip the extra op for now. */
-	cmd->op_end = cmd->op + op_cnt;
-	for (; op < cmd->op_end; op++) {
-		/* read operation */
-		op->field_no = read_u32(data);
-		op->opcode = read_u8(data);
-		if (op->opcode > UPDATE_OP_MAX)
-			op->opcode = UPDATE_OP_MAX;
-		op->meta = &update_op_meta[op->opcode];
-		op->arg.set.value = read_field(data);
-		op->arg.set.length = load_varint32(&op->arg.set.value);
-	}
-	/* Check the remainder length, the request must be fully read. */
-	if (data->size != 0)
-		tnt_raise(IllegalParams, :"can't unpack request");
-
-	return cmd;
-}
-
-static void
-update_field_init(struct update_field *field, struct update_op *op,
-		  void **old_data, int old_field_count)
-{
-	field->first = op;
-
-	if (op->field_no >= old_field_count ||
-	    op->opcode == UPDATE_OP_INSERT) {
-		/* Insert operation always creates a new field. */
-		field->new_len = 0;
-		field->old = ""; /* Beyond old fields. */
+	/* Validate the cut length argument. */
+	op->arg.splice.cut = *(i32 *) cut_field;
+	if (op->arg.splice.cut < 0) {
 		/*
-		 * Old tuple must have at least one field and we
-		 * always have an op on the first field.
+		 * Negative cut length operand. In this case we
 		 */
-		assert(op->field_no > 0 || op->opcode == UPDATE_OP_INSERT);
-		return;
-	}
-	/*
-	 * Find out the new field length and
-	 * shift the data pointer.
-	 */
-	field->new_len = load_varint32(old_data);
-	field->old = *old_data;
-	*old_data += field->new_len;
-}
-
-/**
- * Skip fields unaffected by UPDATE.
- * @return   length of skipped data
- */
-static void
-update_field_skip_fields(struct update_field *field, i32 skip_count,
-			 void **data)
-{
-	if (skip_count < 0) {
-		/* Happens when there are fields added by SET. */
-		skip_count = 0;
-	}
-
-	field->tail_field_count = skip_count;
-
-	field->tail = *data;
-	while (skip_count-- > 0) {
-		u32 len = load_varint32(data);
-		*data += len;
-	}
-
-	field->tail_len = *data - field->tail;
-}
-
-
-/**
- * We found a tuple to do the update on. Prepare and optimize
- * the operations.
- */
-static void
-init_update_operations(struct update_cmd *cmd, struct tuple *old_tuple)
-{
-	/*
-	 * 1. Sort operations by field number and order within the
-	 * request.
-	 */
-	qsort(cmd->op, cmd->op_end - cmd->op, sizeof(struct update_op),
-	      update_op_cmp);
-
-	/*
-	 * 2. Take care of the old tuple head.
-	 */
-	if (cmd->op->field_no != 0) {
-		/*
-		 * We need to copy part of the old tuple to the
-		 * new one.
-		 * Prepend a no-op which copies the first field
-		 * intact. We may also make use of its tail_len
-		 * if next op field_no > 1.
-		 */
-		cmd->op--;
-		cmd->op->opcode = UPDATE_OP_NONE;
-		cmd->op->meta = &update_op_meta[UPDATE_OP_NONE];
-		cmd->op->field_no = 0;
-	}
-
-	/*
-	 * 3. Initialize and optimize the operations.
-	 */
-	cmd->new_tuple_len = 0;
-	assert(cmd->op < cmd->op_end); /* Ensured by parse_update_cmd(). */
-	cmd->field = palloc(fiber->gc_pool, (cmd->op_end - cmd->op) *
-			    sizeof(struct update_field));
-	struct update_op *op = cmd->op;
-	struct update_field *field = cmd->field;
-	void *old_data = old_tuple->data;
-	int old_field_count = old_tuple->field_count;
-
-	update_field_init(field, op, &old_data, old_field_count);
-	do {
-		struct update_op *prev_op = op - 1;
-		struct update_op *next_op = op + 1;
-
-		/*
-		 * Various checks for added fields:
-		 */
-		if (op->field_no >= old_field_count) {
-			/*
-			 * We can not do anything with a new field unless a
-			 * previous field exists.
-			 */
-			int prev_field_no = MAX(old_field_count,
-						prev_op->field_no + 1);
-			if (op->field_no > prev_field_no)
-				tnt_raise(ClientError, :ER_NO_SUCH_FIELD,
-					  op->field_no);
-			/*
-			 * We can not do any op except SET or INSERT
-			 * on a field which does not exist.
-			 */
-			if (prev_op->field_no != op->field_no &&
-			    (op->opcode != UPDATE_OP_SET &&
-			     op->opcode != UPDATE_OP_INSERT))
-				tnt_raise(ClientError, :ER_NO_SUCH_FIELD,
-					  op->field_no);
-		}
-		op->meta->init_op(cmd, field, op);
-		field->new_len = op->new_field_len;
-		/*
-		 * Find out how many fields to copy to the
-		 * new tuple intact once this op is done.
-		 */
-		int skip_count;
-		if (next_op >= cmd->op_end) {
-			/* This is the last op in the request. */
-			skip_count = old_field_count - op->field_no - 1;
-		} else if (op->field_no < next_op->field_no ||
-			   op->opcode == UPDATE_OP_INSERT) {
-			/*
-			 * This is the last op on this field. UPDATE_OP_INSERT
-			 * creates a new field, so it falls
-			 * into this category. Find out length of
-			 * the gap between the op->field_no and
-			 * next and copy the gap.
-			 */
-			skip_count = MIN(next_op->field_no, old_field_count) -
-				     op->field_no - 1;
+		if (-op->arg.splice.cut >
+		    (field->estimated_size - op->arg.splice.offset)) {
+			op->arg.splice.cut = 0;
 		} else {
-			/* Continue, we have more operations on this field */
-			continue;
+			op->arg.splice.cut += field->estimated_size
+				- op->arg.splice.offset;
 		}
-		if (op->opcode == UPDATE_OP_INSERT) {
-			/*
-			 * We're adding a new field, take this
-			 * into account.
-			 */
-			skip_count++;
-		}
-		/* Jumping over a gap. */
-		update_field_skip_fields(field, skip_count, &old_data);
+	} else if (op->arg.splice.cut >
+		   field->estimated_size - op->arg.splice.offset) {
+		op->arg.splice.cut = field->estimated_size -
+			op->arg.splice.offset;
+	}
 
-		field->end = next_op;
-		if (field->first < field->end) {
-			/* Field is not deleted. */
-			cmd->new_tuple_len += varint32_sizeof(field->new_len);
-			cmd->new_tuple_len += field->new_len;
-		}
-		cmd->new_tuple_len += field->tail_len;
+	/*
+	 * Paste string.
+	 */
 
-		/* Move to the next field. */
-		field++;
-		if (next_op < cmd->op_end) {
-			update_field_init(field, next_op,  &old_data,
-					  old_field_count);
-		}
+	void *paste_field = read_field(&operands);
+	op->arg.splice.paste_length = load_varint32(&paste_field);
+	op->arg.splice.paste = paste_field;
 
-	} while (++op < cmd->op_end);
+	/* set new estimated size (field_size - cut + paste): */
+	size_t new_estimated_size = field->estimated_size;
+	new_estimated_size -= op->arg.splice.cut;
+	new_estimated_size += op->arg.splice.paste_length;
 
-	cmd->field_end = field;
-
-	if (cmd->new_tuple_len == 0)
-		tnt_raise(ClientError, :ER_TUPLE_IS_EMPTY);
+	field->max_estimated_size = MAX(field->max_estimated_size,
+					new_estimated_size);
+	field->estimated_size = new_estimated_size;
 }
 
 static void
-do_update_ops(struct update_cmd *cmd, struct tuple *new_tuple)
+eval_update_op_insert(struct rope_tuple *tuple, struct update_op *op)
 {
-	void *new_data = new_tuple->data;
-	void *new_data_end = new_data + new_tuple->bsize;
-	struct update_field *field;
-	new_tuple->field_count = 0;
+	/* Get field number. */
+	size_t field_no = eval_update_op_field_no_ins(tuple, op);
+	/* Create a new field */
+	struct rope_fields *field = rope_fields_new(
+		op->arg.raw, field_full_size(op->arg.raw));
+	/* Insert the field to the tuple. */
+	rope_tuple_insert(tuple, field_no, field, 1);
+}
 
-	for (field = cmd->field; field < cmd->field_end; field++) {
-		if (field->first < field->end) { /* -> field is not deleted. */
-			new_data = save_varint32(new_data, field->new_len);
-			new_tuple->field_count++;
-		}
-		void *new_field = new_data;
-		void *old_field = field->old;
+static void
+eval_update_op_delete(struct rope_tuple *tuple, struct update_op *op)
+{
+	/* Get field number. */
+	size_t field_no = eval_update_op_field_no(tuple, op);
+	/* Delete the field which has field_no from the tuple. */
+	rope_tuple_remove(tuple, field_no, 1);
+}
 
-		struct update_op *op;
-		for (op = field->first; op < field->end; op++) {
-			/*
-			 * Pre-allocate a temporary buffer when the
-			 * subject operation requires it, i.e.:
-			 * - op overwrites data while reading it thus
-			 *   can't work with in == out (SPLICE)
-			 * - op result doesn't fit into the new tuple
-			 *   (can happen when a big SET is then
-			 *   shrunk by a SPLICE).
-			 */
-			if ((old_field == new_field &&
-			     !op->meta->works_in_place) ||
-			    /*
-			     * Sic: this predicate must function even if
-			     * new_field != new_data.
-			     */
-			    new_data + op->new_field_len > new_data_end) {
-				/*
-				 * Since we don't know which of the two
-				 * conditions above got us here, simply
-				 * palloc a *new* buffer of sufficient
-				 * size.
-				 */
-				new_field = palloc(fiber->gc_pool,
-						   op->new_field_len);
-			}
-			op->meta->do_op(&op->arg, old_field, new_field);
-			/* Next op uses previous op output as its input. */
-			old_field = new_field;
-		}
-		/*
-		 * Make sure op results end up in the tuple, copy
-		 * tail_len from the old tuple.
-		*/
-		if (new_field != new_data)
-			memcpy(new_data, new_field, field->new_len);
-		new_data += field->new_len;
-		if (field->tail_field_count) {
-			memcpy(new_data, field->tail, field->tail_len);
-			new_data += field->tail_len;
-			new_tuple->field_count += field->tail_field_count;
+static inline size_t
+eval_update_op_field_no(struct rope_tuple *tuple, struct update_op *op)
+{
+	if (tuple->size == 0)
+		/* The tuple doesn't have any fields. */
+		tnt_raise(ClientError, :ER_NO_SUCH_FIELD, op->field_no);
+
+	if ((i32) op->field_no == -1)
+		/* delete the last field of the tuple */
+		return tuple->size - 1;
+
+	if (op->field_no >= tuple->size)
+		/* The tuple doesn't have #field_no field. */
+		tnt_raise(ClientError, :ER_NO_SUCH_FIELD, op->field_no);
+
+	return op->field_no;
+}
+
+static inline size_t
+eval_update_op_field_no_ins(struct rope_tuple *tuple, struct update_op *op)
+{
+	if ((i32) op->field_no == -1)
+		/* delete the last field of the tuple */
+		return tuple->size;
+
+	if (op->field_no > tuple->size)
+		/* The tuple doesn't have #field_no field. */
+		tnt_raise(ClientError, :ER_NO_SUCH_FIELD, op->field_no);
+
+	return op->field_no;
+}
+
+
+/* ------------------------------------------------------------------------- *
+ * UPDATE tuple apply functions declaration
+ * ------------------------------------------------------------------------- */
+
+static void
+apply_update_op_list(struct rope_fields *field)
+{
+	/*
+	 * Move the field to the temporary buffer for apply mutable operations.
+	 * A mutable filed keeps in the rope field structure w/o field_size
+	 / prefix.
+	 */
+	void *field_data = field->data;
+	size_t field_size = load_varint32(&field_data);
+	/* Move the field to the mutable buffer. */
+	void *field_data_mut = palloc(fiber->gc_pool,
+				      field->max_estimated_size);
+	memcpy(field_data_mut, field_data, field_size);
+	/* Set mutable buffer as field data. */
+	field->data = field_data_mut;
+	field->size = field_size;
+
+	/* apply all operation for the field. */
+	struct update_op *op;
+	STAILQ_FOREACH(op, &field->op_list, op_list_entry) {
+		switch (op->opcode) {
+		case UPDATE_OP_ADD:
+		case UPDATE_OP_AND:
+		case UPDATE_OP_XOR:
+		case UPDATE_OP_OR:
+			/* Apply an arithmetic operation. */
+			apply_update_op_arith(field, op);
+			break;
+		case UPDATE_OP_SPLICE:
+			/* Apply an splice operation. */
+			apply_update_op_splice(field, op);
+			break;
 		}
 	}
 }
+
+static void
+apply_update_op_arith(struct rope_fields *field, struct update_op *op)
+{
+	switch (field->size) {
+	case sizeof(int32_t): {
+		/* 32-bit arithmetic operations. */
+		int32_t *field_value = field->data;
+		switch (op->opcode) {
+		case UPDATE_OP_ADD:
+			*field_value += op->arg.arith.i32_val;
+			break;
+		case UPDATE_OP_AND:
+			*field_value &= op->arg.arith.i32_val;
+			break;
+		case UPDATE_OP_XOR:
+			*field_value ^= op->arg.arith.i32_val;
+			break;
+		case UPDATE_OP_OR:
+			*field_value |= op->arg.arith.i32_val;
+			break;
+		}
+		break;
+	}
+	case sizeof(int64_t): {
+		/* 64-bit arithmetic operations. */
+		int64_t *field_value = field->data;
+		switch (op->opcode) {
+		case UPDATE_OP_ADD:
+			*field_value += op->arg.arith.i64_val;
+			break;
+		case UPDATE_OP_AND:
+			*field_value &= op->arg.arith.i64_val;
+			break;
+		case UPDATE_OP_XOR:
+			*field_value ^= op->arg.arith.i64_val;
+			break;
+		case UPDATE_OP_OR:
+			*field_value |= op->arg.arith.i64_val;
+			break;
+		}
+		break;
+	}
+	}
+}
+
+static void
+apply_update_op_splice(struct rope_fields *field, struct update_op *op)
+{
+	/*
+	 * Splice scheme:
+	 *
+	 * |<----------------- field->size -------------------->|
+	 * |                                                    |
+	 * |---- offset ----|<---- cut ---->|<----- tail ------>|
+	 * +----------------+---------------+-----+-------------+
+	 * |                      field                         |
+	 * +----------------+---------------+-----+-------------+
+	 *                  |<------ paste ------>|
+	 */
+
+	/*
+	 * Move the tail of the field.
+	 */
+
+	size_t tail_size = field->size - op->arg.splice.offset -
+		op->arg.splice.cut;
+	if (tail_size != 0) {
+		/*
+		 * The tail of the field isn't empty. We should move it to the
+		 * end of the paste position.
+		 */
+		void *tail_src = field->data + op->arg.splice.offset +
+			op->arg.splice.cut;
+		void *tail_dest = field->data + op->arg.splice.offset +
+			op->arg.splice.paste_length;
+		memmove(tail_dest, tail_src, tail_size);
+	}
+
+	/*
+	 * Copy the paste string to the field.
+	 */
+
+	if (op->arg.splice.paste_length != 0) {
+		void *paste_dest = field->data + op->arg.splice.offset;
+		memcpy(paste_dest, op->arg.splice.paste,
+		       op->arg.splice.paste_length);
+	}
+
+
+	/*
+	 * New field size
+	 */
+	field->size = field->size - op->arg.splice.cut +
+		op->arg.splice.paste_length;
+}
+
+
+/* ------------------------------------------------------------------------- *
+ * UPDATE tuple rope functions definition
+ * ------------------------------------------------------------------------- */
+
+static inline struct rope_fields *
+rope_fields_new_tuple(struct tuple *tuple)
+{
+	struct rope_fields *entry = palloc(fiber->gc_pool,
+					  sizeof(struct rope_fields));
+
+	entry->data = tuple->data;
+	entry->size = tuple->bsize;
+	STAILQ_INIT(&entry->op_list);
+
+	return entry;
+}
+
+static inline struct rope_fields *
+rope_fields_new(void *data, size_t size)
+{
+	struct rope_fields *entry = palloc(fiber->gc_pool,
+					  sizeof(struct rope_fields));
+	entry->data = data;
+	entry->size = size;
+	STAILQ_INIT(&entry->op_list);
+
+	return entry;
+}
+
+static struct rope_fields *
+rope_fields_split(struct rope_fields *entry, size_t pos)
+{
+	struct tbuf fields = {
+		.capacity = entry->size,
+		.size = entry->size,
+		.data = entry->data,
+		.pool = NULL
+	};
+
+	/* Move field buffer to the pos field. */
+	for (int i = 0; i < pos; ++i)
+		read_field(&fields);
+
+	struct rope_fields *tail = palloc(fiber->gc_pool,
+					  sizeof(struct rope_fields));
+
+	/* Create the new (the tail) entry. */
+	tail->data = fields.data;
+	tail->size = fields.size;
+	STAILQ_INIT(&tail->op_list);
+
+	/* Update the old (the head) entry. */
+	entry->size = entry->size - fields.size;
+
+	return tail;
+}
+
+static inline void
+rope_fields_print(struct rope_fields *entry, size_t size)
+{
+	(void) entry; (void) size;
+}
+
+static inline void
+rope_fields_free(struct palloc_pool *pool, void *ptr)
+{
+	(void) pool; (void) ptr;
+}
+
+crope_define_fun(tuple,
+		 struct rope_fields,
+		 struct palloc_pool,
+		 rope_fields_split,
+		 rope_fields_print,
+		 palloc,
+		 rope_fields_free);
+
+
+/* ========================================================================= *
+ * UPDATE command definition
+ * ========================================================================= */
 
 @implementation Update
 - (void) execute: (struct txn *) txn :(Port *) port
 {
 	txn_add_redo(txn, type, data);
-	struct space *sp = read_space(data);
-	u32 flags = read_u32(data) & BOX_ALLOWED_REQUEST_FLAGS;
+
 	/* Parse UPDATE request. */
-	struct update_cmd *cmd = parse_update_cmd(data);
-
-	/* Try to find the tuple. */
-	struct tuple *old_tuple =
-		[sp->index[0] findByKey :cmd->key :cmd->key_part_count];
-	if (old_tuple != NULL) {
-		init_update_operations(cmd, old_tuple);
-		/* allocate new tuple */
-		txn->new_tuple = tuple_alloc(cmd->new_tuple_len);
-		do_update_ops(cmd, txn->new_tuple);
-		space_validate(sp, old_tuple, txn->new_tuple);
+	struct update_cmd *cmd = read_update_cmd(data);
+	if (cmd->old_tuple != NULL) {
+		struct rope_tuple *eval_tuple = eval_update_ops(cmd);
+		txn->new_tuple = apply_update_ops(eval_tuple);
+		space_validate(cmd->sp, cmd->old_tuple, txn->new_tuple);
 	}
-	txn_add_undo(txn, sp, old_tuple, txn->new_tuple);
 
-	port_send_tuple(flags, port, txn->new_tuple);
+	txn_add_undo(txn, cmd->sp, cmd->old_tuple, txn->new_tuple);
+	port_send_tuple(cmd->flags, port, txn->new_tuple);
 }
 @end
 

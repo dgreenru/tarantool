@@ -1,22 +1,41 @@
->>> test simple set
-# insert tuple
+
+>>> test 'simple set'
+
+#
+# # insert tuple
+
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 2 (0x00000002), 0 (0x00000000), '')
-# test simple set field
+#
+# simple set field
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'new field value', '', 1130450022 (0x43614c66))
-# set field
+#
+# set one field many times
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'field's new value', '', 1130450022 (0x43614c66))
-# test set primary key
+#
+# set primary key
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (2 (0x00000002), 'field's new value', '', 1130450022 (0x43614c66))
-<<< test simple set done
->>> test long set
+
+<<< test 'simple set'
+
+
+>>> test 'long set'
+
+#
 # insert tuple
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', '', 'third')
-# test set big value in empty field
+#
+# set big value in empty field
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'A long time ago, in a galaxy far, far away...
 It is a period of civil war. Rebel
@@ -33,151 +52,194 @@ Princess Leia races home aboard her
 starship, custodian of the stolen plans
 that can save her people and restore
 freedom to the galaxy....', 'third')
-# test replace long value to short
+#
+# replace long value to short
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'short string', 'third')
-<<< test long set done
->>> test append
-# insert tuple
-insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 'first')
-# test append field
-update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 'first', 'second')
-# test multi append
-update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 'first', 'second', 'third')
-# test append many fields
-update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'A long time ago, in a galaxy far, far away...
-It is a period of civil war. Rebel
-spaceships, striking from a hidden
-base, have won their first victory
-against the evil Galactic Empire.
-During the battle, Rebel spies managed
-to steal secret plans to the Empire's
-ultimate weapon, the Death Star, an
-armored space station with enough
-power to destroy an entire planet.
-Pursued by the Empire's sinister agents,
-Princess Leia races home aboard her
-starship, custodian of the stolen plans
-that can save her people and restore
-freedom to the galaxy....')
-# test append and change field
-update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'A long time ago, in a galaxy far, far away...
-It is a period of civil war. Rebel
-spaceships, striking from a hidden
-base, have won their first victory
-against the evil Galactic Empire.
-During the battle, Rebel spies managed
-to steal secret plans to the Empire's
-ultimate weapon, the Death Star, an
-armored space station with enough
-power to destroy an entire planet.
-Pursued by the Empire's sinister agents,
-Princess Leia races home aboard her
-starship, custodian of the stolen plans
-that can save her people and restore
-freedom to the galaxy....', 765239998 (0x2d9ca2be))
-# test set to not an exist field
-update fields: respond ok (op: 19, reqid: 0, code: 13826, count: 0)
-<<< test append done
->>> test 32-bit int arith
-# insert tuple
+
+<<< test 'long set'
+
+
+>>> test '32-bit int arith'
+
+#
+# # insert tuple
+
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 2 (0x00000002), 0 (0x00000000), 0 (0x00000000))
-# test add
+#
+# add
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 18 (0x00000012), 0 (0x00000000), 0 (0x00000000))
-# test overflow add
+#
+# overflow add
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), -2147483631 (0x80000011), 0 (0x00000000), 0 (0x00000000))
-# test underflow add
+#
+# underflow add
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 17 (0x00000011), 0 (0x00000000), 0 (0x00000000))
-# test or
+#
+# or
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 17 (0x00000011), -1160791345 (0xbacfbacf), -88278340 (0xfabcfabc))
-# test xor
+#
+# xor
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 17 (0x00000011), 1160791344 (0x45304530), 88278339 (0x05430543))
-# test and
+#
+# and
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 17 (0x00000011), 1076903984 (0x40304030), 84083971 (0x05030503))
-<<< test 32-bit arith done
->>> test 64-bit int arith
+
+<<< test '32-bit int arith'
+
+
+>>> test '64-bit int arith'
+
+#
 # insert tuple
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 2 (0x0000000000000002), 0 (0x0000000000000000), 0 (0x0000000000000000))
-# test add
+#
+# add
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 18 (0x0000000000000012), 0 (0x0000000000000000), 0 (0x0000000000000000))
-# test overflow add
+#
+# overflow add
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), -9223372036854775791 (0x8000000000000011), 0 (0x0000000000000000), 0 (0x0000000000000000))
-# test underflow add
+#
+# underflow add
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 17 (0x0000000000000011), 0 (0x0000000000000000), 0 (0x0000000000000000))
-# test or
+#
+# or
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 17 (0x0000000000000011), -4985560861120677169 (0xbacfbacfbacfbacf), -379152579038479684 (0xfabcfabcfabcfabc))
-# test xor
+#
+# xor
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 17 (0x0000000000000011), 4985560861120677168 (0x4530453045304530), 379152579038479683 (0x0543054305430543))
-# test and
+#
+# and
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 17 (0x0000000000000011), 4625267393289011248 (0x4030403040304030), 361137905646896387 (0x0503050305030503))
-# test casting 32-bit operand to 64-bit
+#
+# casting 32-bit operand to 64-bit
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 33 (0x0000000000000021), 4625267393289011248 (0x4030403040304030), 361137905646896387 (0x0503050305030503))
-<<< test 64-bit arith done
->>> test multi splice
+
+<<< test '64-bit int arith'
+
+
+>>> test 'multi arithmetic'
+
+#
 # insert tuple
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 128 (0x00000080), 'third')
-# test simple and
+#
+# simple and
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first field new value', 61455 (0x0000f00f), 'third field new value')
-<<< test multi arith done
->>> test simple splice
+
+<<< test 'multi arithmetic'
+
+
+>>> test 'simple splice'
+
+#
 # insert tuple
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'hi, this is a test string!', 'third')
-# test cut from begin
+#
+# cut from begin
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'this is a test string!', 'third')
-# test cut from middle
+#
+# cut from middle
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'this is a string!', 'third')
-# test cut from end
+#
+# cut from end
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'this is a string', 'third')
-# test insert before begin
+#
+# insert before begin
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'Bonjour, this is a string', 'third')
-# test insert after end
+#
+# insert after end
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'Bonjour, this is a string o_O!?', 'third')
-# test replace in begin
+#
+# replace in begin
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'Hello, this is a string o_O!?', 'third')
-# test replace in middle
+#
+# replace in middle
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'Hello, this is a field o_O!?', 'third')
-# test replace in end
+#
+# replace in end
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'Hello, this is a field! Is this Sparta!?', 'third')
-<<< test simple splice done
->>> test set and splice
+#
+# splice to empty string
+#
+update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
+(1 (0x00000001), 'first', '', 'third')
+#
+# invalid offset
+#
+update fields: respond ok (op: 19, reqid: 0, code: 10754, count: 0)
+
+<<< test 'simple splice'
+
+
+>>> test 'set and splice'
+
+#
 # insert tuple
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'hi, this is a test string!', 'third')
-# test set long string and splice to short
+#
+# set long string and splice to short
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'A long time ago, in a galaxy far, far away... away away away.', 'third')
-# test set short value and splice to long
+#
+# set short value and splice to long
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'A long time ago, in a galaxy far, far away...
 It is a period of civil war. Rebel
@@ -194,7 +256,9 @@ Princess Leia races home aboard her
 starship, custodian of the stolen plans
 that can save her people and restore
 freedom to the galaxy....', 'third')
-# test splice to long and set to short
+#
+# splice to long and set to short
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'short name', 'A long time ago, in a galaxy far, far away...
 It is a period of civil war. Rebel
@@ -211,72 +275,141 @@ Princess Leia races home aboard her
 starship, custodian of the stolen plans
 that can save her people and restore
 freedom to the galaxy....')
-<<< test set and splice done
->>> test delete field
+
+<<< test 'set and splice'
+
+
+<<< test 'insert field'
+
+#
 # insert tuple
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (1 (0x00000001), 'first', 'hi, this is a test string!', 'third', 1 (0x00000001), 2 (0x00000002), 3 (0x00000003), 4 (0x00000004), 5 (0x00000005), 6 (0x00000006), 7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a))
-# test simple delete fields
+#
+# delete first field (change pk type)
+#
+update fields: respond ok (op: 19, reqid: 0, code: 9730, count: 0)
+#
+# delete the first fields
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 'first', 'third', 1 (0x00000001), 2 (0x00000002), 3 (0x00000003), 4 (0x00000004), 5 (0x00000005), 6 (0x00000006), 7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a))
-# test useless operations with delete fields
+(1 (0x00000001), 2 (0x00000002), 3 (0x00000003), 4 (0x00000004), 5 (0x00000005), 6 (0x00000006), 7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a))
+#
+# delete from the middle of the tuple
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 'third', 1 (0x00000001), 2 (0x00000002), 3 (0x00000003), 4 (0x00000004), 5 (0x00000005), 6 (0x00000006), 7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a))
-# test multi delete fields
+(1 (0x00000001), 2 (0x00000002), 3 (0x00000003), 4 (0x00000004), 5 (0x00000005), 9 (0x00000009), 10 (0x0000000a))
+#
+# delete from the end of the tuple
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 'third', 10 (0x0000000a))
-# test multi delete fields
+(1 (0x00000001), 2 (0x00000002), 3 (0x00000003), 4 (0x00000004))
+#
+# pop back
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 9 (0x00000009), 10 (0x0000000a))
-# test append and delete
-update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 9 (0x00000009), 10 (0x0000000a), 'third', 'fourth', 'fifth', 'eighth', 'ninth')
-# test double delete
-update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 9 (0x00000009), 10 (0x0000000a), 'fourth', 'fifth', 'eighth', 'ninth')
-select: respond ok (op: 17, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 9 (0x00000009), 10 (0x0000000a), 'fourth', 'fifth', 'eighth', 'ninth')
-# test delete not an exist field
+(1 (0x00000001), 2 (0x00000002))
+#
+# delete not an exist field
+#
 update fields: respond ok (op: 19, reqid: 0, code: 13826, count: 0)
 select: respond ok (op: 17, reqid: 0, code: 0, count: 1)
-(1 (0x00000001), 9 (0x00000009), 10 (0x0000000a), 'fourth', 'fifth', 'eighth', 'ninth')
-<<< test delete field done
->>> test insert field
+(1 (0x00000001), 2 (0x00000002))
+#
+# delete all fields
+#
+update fields: respond ok (op: 19, reqid: 0, code: 13826, count: 0)
+select: respond ok (op: 17, reqid: 0, code: 0, count: 1)
+(1 (0x00000001), 2 (0x00000002))
+#
+# delete all fields
+#
+update fields: respond ok (op: 19, reqid: 0, code: 6146, count: 0)
+select: respond ok (op: 17, reqid: 0, code: 0, count: 1)
+(1 (0x00000001), 2 (0x00000002))
+
+<<< test 'delete field'
+
+
+>>> test 'insert field'
+
+#
 # insert tuple
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (9 (0x00000009), 'eleven')
+#
 # insert new field before primary key
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 'eleven')
-# insert a new field before last field
+#
+# insert a new field before the last field
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a), 'eleven')
-# double insert before set
+#
+# double insert to the end of tuple
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a), 'eleven', 12 (0x0000000c), 13 (0x0000000d), 14 (0x0000000e))
-# insert before next to last field
-update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a), 'eleven', 12 (0x0000000c), 13 (0x0000000d), 14 (0x0000000e), 15 (0x0000000f))
-# insert before next to last field
-update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a), 'eleven', 12 (0x0000000c), 13 (0x0000000d), 14 (0x0000000e), 15 (0x0000000f), 16 (0x00000010), 17 (0x00000011), 18 (0x00000012), 19 (0x00000013))
-# insert second tuple
-insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
-(0 (0x00000000), 'one', 11 (0x0000000b))
+(7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a), 'eleven', 16 (0x00000010), 17 (0x00000011))
+#
 # multi insert
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
-(0 (0x00000000), 1 (0x00000001), 2 (0x00000002), 3 (0x00000003), 4 (0x00000004), 5 (0x00000005), 6 (0x00000006), 7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a), 11 (0x0000000b))
-# insert before invalid field number
+(7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a), 'eleven', 12 (0x0000000c), 13 (0x0000000d), 14 (0x0000000e), 15 (0x0000000f), 16 (0x00000010), 17 (0x00000011))
+#
+# push back fields
+
+#
+update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
+(7 (0x00000007), 8 (0x00000008), 9 (0x00000009), 10 (0x0000000a), 'eleven', 12 (0x0000000c), 13 (0x0000000d), 14 (0x0000000e), 15 (0x0000000f), 16 (0x00000010), 17 (0x00000011), 18 (0x00000012), 19 (0x00000013), 20 (0x00000014))
+#
+# insert invalid field number
+
+#
 update fields: respond ok (op: 19, reqid: 0, code: 13826, count: 0)
-<<< insert field test done
->>> test boundaty argumets values
+
+<<< test 'insert field'
+
+
+>>> test 'insert and delete fields'
+
+#
 # insert tuple
+#
+insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
+(1 (0x00000001), 2 (0x00000002))
+#
+# delete all fields and insert new
+#
+update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
+(5 (0x00000005), 6 (0x00000006), 7 (0x00000007), 8 (0x00000008), 9 (0x00000009))
+
+<<< test 'insert and delete fields'
+
+
+>>> test 'boundaty argumets values'
+
+#
+# insert tuple
+#
 insert: respond ok (op: 13, reqid: 0, code: 0, count: 1)
 (0 (0x00000000), 1 (0x00000001))
-# test: try to do update w/o operations
-update fields: respond ok (op: 19, reqid: 0, code: 514, count: 0)
-# test: update w/ maximal allowed opearions count
+#
+# try to do update w/o operations
+#
+update fields: respond ok (op: 19, reqid: 0, code: 6402, count: 0)
+#
+# update w/ maximal allowed opearions count
+#
 update fields: respond ok (op: 19, reqid: 0, code: 0, count: 1)
 (0 (0x00000000), 129 (0x00000081))
-# test: update w/ grater than maximal allowed opearions count
-update fields: respond ok (op: 19, reqid: 0, code: 514, count: 0)
+#
+# update w/ grater than maximal allowed opearions count
+#
+update fields: respond ok (op: 19, reqid: 0, code: 6658, count: 0)
+
+<<< test 'boundaty argumets values'
+
