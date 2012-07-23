@@ -19,6 +19,7 @@ test/box/protocol
 test/box/connector
 test/unit/queue
 test/unit/mhash
+test/unit/crope
 test/unit/objc_finally
 test/unit/objc_catchcxx
 Makefile

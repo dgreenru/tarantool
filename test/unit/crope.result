@@ -1,0 +1,702 @@
+test (size = 14, balance = 1) = 'who's gonna be'
+└── { len = 14, data = 'who's gonna be'}
+
+#
+# crope str append test
+#
+
+append str = '<Mr.X>'
+test (size = 20, balance = 1) = 'who's gonna be<Mr.X>'
+└── { depth = 1, weight = 14 }
+    ├── { len = 14, data = 'who's gonna be'}
+    └── { len = 6, data = '<Mr.X>'}
+
+append str = ', Mr. <black!?!>Black'
+test (size = 41, balance = 1) = 'who's gonna be<Mr.X>, Mr. <black!?!>Black'
+└── { depth = 2, weight = 20 }
+    ├── { depth = 1, weight = 14 }
+    │   ├── { len = 14, data = 'who's gonna be'}
+    │   └── { len = 6, data = '<Mr.X>'}
+    └── { len = 21, data = ', Mr. <black!?!>Black'}
+
+append str = ', but they, <know-something-'
+test (size = 69, balance = 1) = 'who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-'
+└── { depth = 3, weight = 41 }
+    ├── { depth = 2, weight = 20 }
+    │   ├── { depth = 1, weight = 14 }
+    │   │   ├── { len = 14, data = 'who's gonna be'}
+    │   │   └── { len = 6, data = '<Mr.X>'}
+    │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+    └── { len = 28, data = ', but they, <know-something-'}
+
+
+#
+# crope str prepend test
+#
+
+prepend str = 'guys all '
+test (size = 78, balance = 1) = 'guys all who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-'
+└── { depth = 4, weight = 9 }
+    ├── { len = 9, data = 'guys all '}
+    └── { depth = 3, weight = 41 }
+        ├── { depth = 2, weight = 20 }
+        │   ├── { depth = 1, weight = 14 }
+        │   │   ├── { len = 14, data = 'who's gonna be'}
+        │   │   └── { len = 6, data = '<Mr.X>'}
+        │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+        └── { len = 28, data = ', but they, <know-something-'}
+
+
+#
+# crope str insert test
+#
+
+insert pos = 9, str = 'five fighting over '
+test (size = 97, balance = 1) = 'guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-'
+└── { depth = 4, weight = 28 }
+    ├── { depth = 2, weight = 9 }
+    │   ├── { depth = 1, weight = 9 }
+    │   │   ├── { len = 9, data = 'guys all '}
+    │   │   └── nil
+    │   └── { len = 19, data = 'five fighting over '}
+    └── { depth = 3, weight = 41 }
+        ├── { depth = 2, weight = 20 }
+        │   ├── { depth = 1, weight = 14 }
+        │   │   ├── { len = 14, data = 'who's gonna be'}
+        │   │   └── { len = 6, data = '<Mr.X>'}
+        │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+        └── { len = 28, data = ', but they, <know-something-'}
+
+insert pos = 0, str = '<yes, got got>You got four or '
+test (size = 127, balance = 1) = '<yes, got got>You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-'
+└── { depth = 5, weight = 30 }
+    ├── { len = 30, data = '<yes, got got>You got four or '}
+    └── { depth = 4, weight = 28 }
+        ├── { depth = 2, weight = 9 }
+        │   ├── { depth = 1, weight = 9 }
+        │   │   ├── { len = 9, data = 'guys all '}
+        │   │   └── nil
+        │   └── { len = 19, data = 'five fighting over '}
+        └── { depth = 3, weight = 41 }
+            ├── { depth = 2, weight = 20 }
+            │   ├── { depth = 1, weight = 14 }
+            │   │   ├── { len = 14, data = 'who's gonna be'}
+            │   │   └── { len = 6, data = '<Mr.X>'}
+            │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+            └── { len = 28, data = ', but they, <know-something-'}
+
+insert pos = 127, str = 'special> don't know each other'
+test (size = 157, balance = 1) = '<yes, got got>You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-special> don't know each other'
+└── { depth = 6, weight = 127 }
+    ├── { depth = 5, weight = 30 }
+    │   ├── { len = 30, data = '<yes, got got>You got four or '}
+    │   └── { depth = 4, weight = 28 }
+    │       ├── { depth = 2, weight = 9 }
+    │       │   ├── { depth = 1, weight = 9 }
+    │       │   │   ├── { len = 9, data = 'guys all '}
+    │       │   │   └── nil
+    │       │   └── { len = 19, data = 'five fighting over '}
+    │       └── { depth = 3, weight = 41 }
+    │           ├── { depth = 2, weight = 20 }
+    │           │   ├── { depth = 1, weight = 14 }
+    │           │   │   ├── { len = 14, data = 'who's gonna be'}
+    │           │   │   └── { len = 6, data = '<Mr.X>'}
+    │           │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+    │           └── { len = 28, data = ', but they, <know-something-'}
+    └── { len = 30, data = 'special> don't know each other'}
+
+insert pos = 18446744073709551615, str = ', so nobody wants to back.'
+test (size = 183, balance = 1) = '<yes, got got>You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-special> don't know each other, so nobody wants to back.'
+└── { depth = 7, weight = 157 }
+    ├── { depth = 6, weight = 127 }
+    │   ├── { depth = 5, weight = 30 }
+    │   │   ├── { len = 30, data = '<yes, got got>You got four or '}
+    │   │   └── { depth = 4, weight = 28 }
+    │   │       ├── { depth = 2, weight = 9 }
+    │   │       │   ├── { depth = 1, weight = 9 }
+    │   │       │   │   ├── { len = 9, data = 'guys all '}
+    │   │       │   │   └── nil
+    │   │       │   └── { len = 19, data = 'five fighting over '}
+    │   │       └── { depth = 3, weight = 41 }
+    │   │           ├── { depth = 2, weight = 20 }
+    │   │           │   ├── { depth = 1, weight = 14 }
+    │   │           │   │   ├── { len = 14, data = 'who's gonna be'}
+    │   │           │   │   └── { len = 6, data = '<Mr.X>'}
+    │   │           │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+    │   │           └── { len = 28, data = ', but they, <know-something-'}
+    │   └── { len = 30, data = 'special> don't know each other'}
+    └── { len = 26, data = ', so nobody wants to back.'}
+
+insert pos = 182, str = ' down'
+test (size = 188, balance = 1) = '<yes, got got>You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-special> don't know each other, so nobody wants to back down.'
+└── { depth = 9, weight = 187 }
+    ├── { depth = 8, weight = 182 }
+    │   ├── { depth = 7, weight = 157 }
+    │   │   ├── { depth = 6, weight = 127 }
+    │   │   │   ├── { depth = 5, weight = 30 }
+    │   │   │   │   ├── { len = 30, data = '<yes, got got>You got four or '}
+    │   │   │   │   └── { depth = 4, weight = 28 }
+    │   │   │   │       ├── { depth = 2, weight = 9 }
+    │   │   │   │       │   ├── { depth = 1, weight = 9 }
+    │   │   │   │       │   │   ├── { len = 9, data = 'guys all '}
+    │   │   │   │       │   │   └── nil
+    │   │   │   │       │   └── { len = 19, data = 'five fighting over '}
+    │   │   │   │       └── { depth = 3, weight = 41 }
+    │   │   │   │           ├── { depth = 2, weight = 20 }
+    │   │   │   │           │   ├── { depth = 1, weight = 14 }
+    │   │   │   │           │   │   ├── { len = 14, data = 'who's gonna be'}
+    │   │   │   │           │   │   └── { len = 6, data = '<Mr.X>'}
+    │   │   │   │           │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+    │   │   │   │           └── { len = 28, data = ', but they, <know-something-'}
+    │   │   │   └── { len = 30, data = 'special> don't know each other'}
+    │   │   └── { len = 25, data = ', so nobody wants to back'}
+    │   └── { len = 5, data = ' down'}
+    └── { len = 1, data = '.'}
+
+insert pos = 18446744073709551615, str = '<point-point>'
+test (size = 201, balance = 1) = '<yes, got got>You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-special> don't know each other, so nobody wants to back down.<point-point>'
+└── { depth = 10, weight = 188 }
+    ├── { depth = 9, weight = 187 }
+    │   ├── { depth = 8, weight = 182 }
+    │   │   ├── { depth = 7, weight = 157 }
+    │   │   │   ├── { depth = 6, weight = 127 }
+    │   │   │   │   ├── { depth = 5, weight = 30 }
+    │   │   │   │   │   ├── { len = 30, data = '<yes, got got>You got four or '}
+    │   │   │   │   │   └── { depth = 4, weight = 28 }
+    │   │   │   │   │       ├── { depth = 2, weight = 9 }
+    │   │   │   │   │       │   ├── { depth = 1, weight = 9 }
+    │   │   │   │   │       │   │   ├── { len = 9, data = 'guys all '}
+    │   │   │   │   │       │   │   └── nil
+    │   │   │   │   │       │   └── { len = 19, data = 'five fighting over '}
+    │   │   │   │   │       └── { depth = 3, weight = 41 }
+    │   │   │   │   │           ├── { depth = 2, weight = 20 }
+    │   │   │   │   │           │   ├── { depth = 1, weight = 14 }
+    │   │   │   │   │           │   │   ├── { len = 14, data = 'who's gonna be'}
+    │   │   │   │   │           │   │   └── { len = 6, data = '<Mr.X>'}
+    │   │   │   │   │           │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+    │   │   │   │   │           └── { len = 28, data = ', but they, <know-something-'}
+    │   │   │   │   └── { len = 30, data = 'special> don't know each other'}
+    │   │   │   └── { len = 25, data = ', so nobody wants to back'}
+    │   │   └── { len = 5, data = ' down'}
+    │   └── { len = 1, data = '.'}
+    └── { len = 13, data = '<point-point>'}
+
+
+#
+# crope str remove test
+#
+
+remove pos = 0, size = 5 
+test (size = 196, balance = 1) = ' got got>You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-special> don't know each other, so nobody wants to back down.<point-point>'
+└── { depth = 6, weight = 25 }
+    ├── { len = 25, data = ' got got>You got four or '}
+    └── { depth = 5, weight = 97 }
+        ├── { depth = 4, weight = 28 }
+        │   ├── { depth = 2, weight = 9 }
+        │   │   ├── { depth = 1, weight = 9 }
+        │   │   │   ├── { len = 9, data = 'guys all '}
+        │   │   │   └── nil
+        │   │   └── { len = 19, data = 'five fighting over '}
+        │   └── { depth = 3, weight = 41 }
+        │       ├── { depth = 2, weight = 20 }
+        │       │   ├── { depth = 1, weight = 14 }
+        │       │   │   ├── { len = 14, data = 'who's gonna be'}
+        │       │   │   └── { len = 6, data = '<Mr.X>'}
+        │       │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+        │       └── { len = 28, data = ', but they, <know-something-'}
+        └── { depth = 4, weight = 30 }
+            ├── { len = 30, data = 'special> don't know each other'}
+            └── { depth = 3, weight = 25 }
+                ├── { len = 25, data = ', so nobody wants to back'}
+                └── { depth = 2, weight = 5 }
+                    ├── { len = 5, data = ' down'}
+                    └── { depth = 1, weight = 1 }
+                        ├── { len = 1, data = '.'}
+                        └── { len = 13, data = '<point-point>'}
+
+remove pos = 0, size = 9 
+test (size = 187, balance = 1) = 'You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-special> don't know each other, so nobody wants to back down.<point-point>'
+└── { depth = 6, weight = 16 }
+    ├── { len = 16, data = 'You got four or '}
+    └── { depth = 5, weight = 97 }
+        ├── { depth = 4, weight = 28 }
+        │   ├── { depth = 2, weight = 9 }
+        │   │   ├── { depth = 1, weight = 9 }
+        │   │   │   ├── { len = 9, data = 'guys all '}
+        │   │   │   └── nil
+        │   │   └── { len = 19, data = 'five fighting over '}
+        │   └── { depth = 3, weight = 41 }
+        │       ├── { depth = 2, weight = 20 }
+        │       │   ├── { depth = 1, weight = 14 }
+        │       │   │   ├── { len = 14, data = 'who's gonna be'}
+        │       │   │   └── { len = 6, data = '<Mr.X>'}
+        │       │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+        │       └── { len = 28, data = ', but they, <know-something-'}
+        └── { depth = 4, weight = 30 }
+            ├── { len = 30, data = 'special> don't know each other'}
+            └── { depth = 3, weight = 25 }
+                ├── { len = 25, data = ', so nobody wants to back'}
+                └── { depth = 2, weight = 5 }
+                    ├── { len = 5, data = ' down'}
+                    └── { depth = 1, weight = 1 }
+                        ├── { len = 1, data = '.'}
+                        └── { len = 13, data = '<point-point>'}
+
+remove pos = 180, size = 7 
+test (size = 180, balance = 1) = 'You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-special> don't know each other, so nobody wants to back down.<point'
+└── { depth = 6, weight = 16 }
+    ├── { len = 16, data = 'You got four or '}
+    └── { depth = 5, weight = 97 }
+        ├── { depth = 4, weight = 28 }
+        │   ├── { depth = 2, weight = 9 }
+        │   │   ├── { depth = 1, weight = 9 }
+        │   │   │   ├── { len = 9, data = 'guys all '}
+        │   │   │   └── nil
+        │   │   └── { len = 19, data = 'five fighting over '}
+        │   └── { depth = 3, weight = 41 }
+        │       ├── { depth = 2, weight = 20 }
+        │       │   ├── { depth = 1, weight = 14 }
+        │       │   │   ├── { len = 14, data = 'who's gonna be'}
+        │       │   │   └── { len = 6, data = '<Mr.X>'}
+        │       │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+        │       └── { len = 28, data = ', but they, <know-something-'}
+        └── { depth = 4, weight = 30 }
+            ├── { len = 30, data = 'special> don't know each other'}
+            └── { depth = 3, weight = 25 }
+                ├── { len = 25, data = ', so nobody wants to back'}
+                └── { depth = 2, weight = 5 }
+                    ├── { len = 5, data = ' down'}
+                    └── { depth = 1, weight = 1 }
+                        ├── { len = 1, data = '.'}
+                        └── { len = 6, data = '<point'}
+
+remove pos = 174, size = 18446744073709551615 
+test (size = 174, balance = 1) = 'You got four or guys all five fighting over who's gonna be<Mr.X>, Mr. <black!?!>Black, but they, <know-something-special> don't know each other, so nobody wants to back down.'
+└── { depth = 6, weight = 16 }
+    ├── { len = 16, data = 'You got four or '}
+    └── { depth = 5, weight = 97 }
+        ├── { depth = 4, weight = 28 }
+        │   ├── { depth = 2, weight = 9 }
+        │   │   ├── { depth = 1, weight = 9 }
+        │   │   │   ├── { len = 9, data = 'guys all '}
+        │   │   │   └── nil
+        │   │   └── { len = 19, data = 'five fighting over '}
+        │   └── { depth = 3, weight = 41 }
+        │       ├── { depth = 2, weight = 20 }
+        │       │   ├── { depth = 1, weight = 14 }
+        │       │   │   ├── { len = 14, data = 'who's gonna be'}
+        │       │   │   └── { len = 6, data = '<Mr.X>'}
+        │       │   └── { len = 21, data = ', Mr. <black!?!>Black'}
+        │       └── { len = 28, data = ', but they, <know-something-'}
+        └── { depth = 4, weight = 30 }
+            ├── { len = 30, data = 'special> don't know each other'}
+            └── { depth = 3, weight = 25 }
+                ├── { len = 25, data = ', so nobody wants to back'}
+                └── { depth = 2, weight = 5 }
+                    ├── { len = 5, data = ' down'}
+                    └── { depth = 1, weight = 1 }
+                        ├── { len = 1, data = '.'}
+                        └── nil
+
+remove pos = 58, size = 7 
+test (size = 167, balance = 1) = 'You got four or guys all five fighting over who's gonna be Mr. <black!?!>Black, but they, <know-something-special> don't know each other, so nobody wants to back down.'
+└── { depth = 7, weight = 58 }
+    ├── { depth = 6, weight = 16 }
+    │   ├── { len = 16, data = 'You got four or '}
+    │   └── { depth = 5, weight = 42 }
+    │       ├── { depth = 4, weight = 28 }
+    │       │   ├── { depth = 2, weight = 9 }
+    │       │   │   ├── { depth = 1, weight = 9 }
+    │       │   │   │   ├── { len = 9, data = 'guys all '}
+    │       │   │   │   └── nil
+    │       │   │   └── { len = 19, data = 'five fighting over '}
+    │       │   └── { depth = 3, weight = 14 }
+    │       │       ├── { depth = 2, weight = 14 }
+    │       │       │   ├── { depth = 1, weight = 14 }
+    │       │       │   │   ├── { len = 14, data = 'who's gonna be'}
+    │       │       │   │   └── nil
+    │       │       │   └── nil
+    │       │       └── nil
+    │       └── nil
+    └── { depth = 6, weight = 20 }
+        ├── { len = 20, data = ' Mr. <black!?!>Black'}
+        └── { depth = 5, weight = 28 }
+            ├── { len = 28, data = ', but they, <know-something-'}
+            └── { depth = 4, weight = 30 }
+                ├── { len = 30, data = 'special> don't know each other'}
+                └── { depth = 3, weight = 25 }
+                    ├── { len = 25, data = ', so nobody wants to back'}
+                    └── { depth = 2, weight = 5 }
+                        ├── { len = 5, data = ' down'}
+                        └── { depth = 1, weight = 1 }
+                            ├── { len = 1, data = '.'}
+                            └── nil
+
+remove pos = 63, size = 10 
+test (size = 157, balance = 1) = 'You got four or guys all five fighting over who's gonna be Mr. Black, but they, <know-something-special> don't know each other, so nobody wants to back down.'
+└── { depth = 8, weight = 63 }
+    ├── { depth = 7, weight = 58 }
+    │   ├── { depth = 6, weight = 16 }
+    │   │   ├── { len = 16, data = 'You got four or '}
+    │   │   └── { depth = 5, weight = 42 }
+    │   │       ├── { depth = 4, weight = 28 }
+    │   │       │   ├── { depth = 2, weight = 9 }
+    │   │       │   │   ├── { depth = 1, weight = 9 }
+    │   │       │   │   │   ├── { len = 9, data = 'guys all '}
+    │   │       │   │   │   └── nil
+    │   │       │   │   └── { len = 19, data = 'five fighting over '}
+    │   │       │   └── { depth = 3, weight = 14 }
+    │   │       │       ├── { depth = 2, weight = 14 }
+    │   │       │       │   ├── { depth = 1, weight = 14 }
+    │   │       │       │   │   ├── { len = 14, data = 'who's gonna be'}
+    │   │       │       │   │   └── nil
+    │   │       │       │   └── nil
+    │   │       │       └── nil
+    │   │       └── nil
+    │   └── { depth = 1, weight = 5 }
+    │       ├── { len = 5, data = ' Mr. '}
+    │       └── nil
+    └── { depth = 6, weight = 5 }
+        ├── { len = 5, data = 'Black'}
+        └── { depth = 5, weight = 28 }
+            ├── { len = 28, data = ', but they, <know-something-'}
+            └── { depth = 4, weight = 30 }
+                ├── { len = 30, data = 'special> don't know each other'}
+                └── { depth = 3, weight = 25 }
+                    ├── { len = 25, data = ', so nobody wants to back'}
+                    └── { depth = 2, weight = 5 }
+                        ├── { len = 5, data = ' down'}
+                        └── { depth = 1, weight = 1 }
+                            ├── { len = 1, data = '.'}
+                            └── nil
+
+remove pos = 80, size = 25 
+test (size = 132, balance = 1) = 'You got four or guys all five fighting over who's gonna be Mr. Black, but they, don't know each other, so nobody wants to back down.'
+└── { depth = 9, weight = 80 }
+    ├── { depth = 8, weight = 63 }
+    │   ├── { depth = 7, weight = 58 }
+    │   │   ├── { depth = 6, weight = 16 }
+    │   │   │   ├── { len = 16, data = 'You got four or '}
+    │   │   │   └── { depth = 5, weight = 42 }
+    │   │   │       ├── { depth = 4, weight = 28 }
+    │   │   │       │   ├── { depth = 2, weight = 9 }
+    │   │   │       │   │   ├── { depth = 1, weight = 9 }
+    │   │   │       │   │   │   ├── { len = 9, data = 'guys all '}
+    │   │   │       │   │   │   └── nil
+    │   │   │       │   │   └── { len = 19, data = 'five fighting over '}
+    │   │   │       │   └── { depth = 3, weight = 14 }
+    │   │   │       │       ├── { depth = 2, weight = 14 }
+    │   │   │       │       │   ├── { depth = 1, weight = 14 }
+    │   │   │       │       │   │   ├── { len = 14, data = 'who's gonna be'}
+    │   │   │       │       │   │   └── nil
+    │   │   │       │       │   └── nil
+    │   │   │       │       └── nil
+    │   │   │       └── nil
+    │   │   └── { depth = 1, weight = 5 }
+    │   │       ├── { len = 5, data = ' Mr. '}
+    │   │       └── nil
+    │   └── { depth = 6, weight = 5 }
+    │       ├── { len = 5, data = 'Black'}
+    │       └── { depth = 1, weight = 12 }
+    │           ├── { len = 12, data = ', but they, '}
+    │           └── nil
+    └── { depth = 4, weight = 21 }
+        ├── { len = 21, data = 'don't know each other'}
+        └── { depth = 3, weight = 25 }
+            ├── { len = 25, data = ', so nobody wants to back'}
+            └── { depth = 2, weight = 5 }
+                ├── { len = 5, data = ' down'}
+                └── { depth = 1, weight = 1 }
+                    ├── { len = 1, data = '.'}
+                    └── nil
+
+remove pos = 131, size = 1 
+test (size = 131, balance = 1) = 'You got four or guys all five fighting over who's gonna be Mr. Black, but they, don't know each other, so nobody wants to back down'
+└── { depth = 9, weight = 80 }
+    ├── { depth = 8, weight = 63 }
+    │   ├── { depth = 7, weight = 58 }
+    │   │   ├── { depth = 6, weight = 16 }
+    │   │   │   ├── { len = 16, data = 'You got four or '}
+    │   │   │   └── { depth = 5, weight = 42 }
+    │   │   │       ├── { depth = 4, weight = 28 }
+    │   │   │       │   ├── { depth = 2, weight = 9 }
+    │   │   │       │   │   ├── { depth = 1, weight = 9 }
+    │   │   │       │   │   │   ├── { len = 9, data = 'guys all '}
+    │   │   │       │   │   │   └── nil
+    │   │   │       │   │   └── { len = 19, data = 'five fighting over '}
+    │   │   │       │   └── { depth = 3, weight = 14 }
+    │   │   │       │       ├── { depth = 2, weight = 14 }
+    │   │   │       │       │   ├── { depth = 1, weight = 14 }
+    │   │   │       │       │   │   ├── { len = 14, data = 'who's gonna be'}
+    │   │   │       │       │   │   └── nil
+    │   │   │       │       │   └── nil
+    │   │   │       │       └── nil
+    │   │   │       └── nil
+    │   │   └── { depth = 1, weight = 5 }
+    │   │       ├── { len = 5, data = ' Mr. '}
+    │   │       └── nil
+    │   └── { depth = 6, weight = 5 }
+    │       ├── { len = 5, data = 'Black'}
+    │       └── { depth = 1, weight = 12 }
+    │           ├── { len = 12, data = ', but they, '}
+    │           └── nil
+    └── { depth = 4, weight = 21 }
+        ├── { len = 21, data = 'don't know each other'}
+        └── { depth = 3, weight = 25 }
+            ├── { len = 25, data = ', so nobody wants to back'}
+            └── { depth = 1, weight = 5 }
+                ├── { len = 5, data = ' down'}
+                └── nil
+
+
+#
+# crope extract test
+#
+
+extract pos = 0
+sym = 'Y'
+test (size = 131, balance = 0) = 'You got four or guys all five fighting over who's gonna be Mr. Black, but they, don't know each other, so nobody wants to back down'
+└── { depth = 10, weight = 16 }
+    ├── { depth = 1, weight = 1 }
+    │   ├── { len = 1, data = 'Y'}
+    │   └── { len = 15, data = 'ou got four or '}
+    └── { depth = 9, weight = 42 }
+        ├── { depth = 5, weight = 42 }
+        │   ├── { depth = 4, weight = 28 }
+        │   │   ├── { depth = 2, weight = 9 }
+        │   │   │   ├── { depth = 1, weight = 9 }
+        │   │   │   │   ├── { len = 9, data = 'guys all '}
+        │   │   │   │   └── nil
+        │   │   │   └── { len = 19, data = 'five fighting over '}
+        │   │   └── { depth = 3, weight = 14 }
+        │   │       ├── { depth = 2, weight = 14 }
+        │   │       │   ├── { depth = 1, weight = 14 }
+        │   │       │   │   ├── { len = 14, data = 'who's gonna be'}
+        │   │       │   │   └── nil
+        │   │       │   └── nil
+        │   │       └── nil
+        │   └── nil
+        └── { depth = 8, weight = 5 }
+            ├── { depth = 1, weight = 5 }
+            │   ├── { len = 5, data = ' Mr. '}
+            │   └── nil
+            └── { depth = 7, weight = 17 }
+                ├── { depth = 6, weight = 5 }
+                │   ├── { len = 5, data = 'Black'}
+                │   └── { depth = 1, weight = 12 }
+                │       ├── { len = 12, data = ', but they, '}
+                │       └── nil
+                └── { depth = 4, weight = 21 }
+                    ├── { len = 21, data = 'don't know each other'}
+                    └── { depth = 3, weight = 25 }
+                        ├── { len = 25, data = ', so nobody wants to back'}
+                        └── { depth = 1, weight = 5 }
+                            ├── { len = 5, data = ' down'}
+                            └── nil
+
+extract pos = 5
+sym = 'o'
+test (size = 131, balance = 0) = 'You got four or guys all five fighting over who's gonna be Mr. Black, but they, don't know each other, so nobody wants to back down'
+└── { depth = 10, weight = 16 }
+    ├── { depth = 4, weight = 6 }
+    │   ├── { depth = 3, weight = 5 }
+    │   │   ├── { depth = 2, weight = 5 }
+    │   │   │   ├── { depth = 1, weight = 1 }
+    │   │   │   │   ├── { len = 1, data = 'Y'}
+    │   │   │   │   └── { len = 4, data = 'ou g'}
+    │   │   │   └── nil
+    │   │   └── { len = 1, data = 'o'}
+    │   └── { len = 10, data = 't four or '}
+    └── { depth = 9, weight = 42 }
+        ├── { depth = 5, weight = 42 }
+        │   ├── { depth = 4, weight = 28 }
+        │   │   ├── { depth = 2, weight = 9 }
+        │   │   │   ├── { depth = 1, weight = 9 }
+        │   │   │   │   ├── { len = 9, data = 'guys all '}
+        │   │   │   │   └── nil
+        │   │   │   └── { len = 19, data = 'five fighting over '}
+        │   │   └── { depth = 3, weight = 14 }
+        │   │       ├── { depth = 2, weight = 14 }
+        │   │       │   ├── { depth = 1, weight = 14 }
+        │   │       │   │   ├── { len = 14, data = 'who's gonna be'}
+        │   │       │   │   └── nil
+        │   │       │   └── nil
+        │   │       └── nil
+        │   └── nil
+        └── { depth = 8, weight = 5 }
+            ├── { depth = 1, weight = 5 }
+            │   ├── { len = 5, data = ' Mr. '}
+            │   └── nil
+            └── { depth = 7, weight = 17 }
+                ├── { depth = 6, weight = 5 }
+                │   ├── { len = 5, data = 'Black'}
+                │   └── { depth = 1, weight = 12 }
+                │       ├── { len = 12, data = ', but they, '}
+                │       └── nil
+                └── { depth = 4, weight = 21 }
+                    ├── { len = 21, data = 'don't know each other'}
+                    └── { depth = 3, weight = 25 }
+                        ├── { len = 25, data = ', so nobody wants to back'}
+                        └── { depth = 1, weight = 5 }
+                            ├── { len = 5, data = ' down'}
+                            └── nil
+
+extract pos = 19
+sym = 's'
+test (size = 131, balance = 1) = 'You got four or guys all five fighting over who's gonna be Mr. Black, but they, don't know each other, so nobody wants to back down'
+└── { depth = 9, weight = 58 }
+    ├── { depth = 6, weight = 44 }
+    │   ├── { depth = 5, weight = 16 }
+    │   │   ├── { depth = 4, weight = 6 }
+    │   │   │   ├── { depth = 3, weight = 5 }
+    │   │   │   │   ├── { depth = 2, weight = 5 }
+    │   │   │   │   │   ├── { depth = 1, weight = 1 }
+    │   │   │   │   │   │   ├── { len = 1, data = 'Y'}
+    │   │   │   │   │   │   └── { len = 4, data = 'ou g'}
+    │   │   │   │   │   └── nil
+    │   │   │   │   └── { len = 1, data = 'o'}
+    │   │   │   └── { len = 10, data = 't four or '}
+    │   │   └── { depth = 4, weight = 9 }
+    │   │       ├── { depth = 3, weight = 3 }
+    │   │       │   ├── { depth = 2, weight = 3 }
+    │   │       │   │   ├── { depth = 1, weight = 3 }
+    │   │       │   │   │   ├── { len = 3, data = 'guy'}
+    │   │       │   │   │   └── nil
+    │   │       │   │   └── nil
+    │   │       │   └── { depth = 1, weight = 1 }
+    │   │       │       ├── { len = 1, data = 's'}
+    │   │       │       └── { len = 5, data = ' all '}
+    │   │       └── { len = 19, data = 'five fighting over '}
+    │   └── { depth = 3, weight = 14 }
+    │       ├── { depth = 2, weight = 14 }
+    │       │   ├── { depth = 1, weight = 14 }
+    │       │   │   ├── { len = 14, data = 'who's gonna be'}
+    │       │   │   └── nil
+    │       │   └── nil
+    │       └── nil
+    └── { depth = 8, weight = 5 }
+        ├── { depth = 1, weight = 5 }
+        │   ├── { len = 5, data = ' Mr. '}
+        │   └── nil
+        └── { depth = 7, weight = 17 }
+            ├── { depth = 6, weight = 5 }
+            │   ├── { len = 5, data = 'Black'}
+            │   └── { depth = 1, weight = 12 }
+            │       ├── { len = 12, data = ', but they, '}
+            │       └── nil
+            └── { depth = 4, weight = 21 }
+                ├── { len = 21, data = 'don't know each other'}
+                └── { depth = 3, weight = 25 }
+                    ├── { len = 25, data = ', so nobody wants to back'}
+                    └── { depth = 1, weight = 5 }
+                        ├── { len = 5, data = ' down'}
+                        └── nil
+
+extract pos = 59
+sym = 'M'
+test (size = 131, balance = 0) = 'You got four or guys all five fighting over who's gonna be Mr. Black, but they, don't know each other, so nobody wants to back down'
+└── { depth = 10, weight = 58 }
+    ├── { depth = 6, weight = 44 }
+    │   ├── { depth = 5, weight = 16 }
+    │   │   ├── { depth = 4, weight = 6 }
+    │   │   │   ├── { depth = 3, weight = 5 }
+    │   │   │   │   ├── { depth = 2, weight = 5 }
+    │   │   │   │   │   ├── { depth = 1, weight = 1 }
+    │   │   │   │   │   │   ├── { len = 1, data = 'Y'}
+    │   │   │   │   │   │   └── { len = 4, data = 'ou g'}
+    │   │   │   │   │   └── nil
+    │   │   │   │   └── { len = 1, data = 'o'}
+    │   │   │   └── { len = 10, data = 't four or '}
+    │   │   └── { depth = 4, weight = 9 }
+    │   │       ├── { depth = 3, weight = 3 }
+    │   │       │   ├── { depth = 2, weight = 3 }
+    │   │       │   │   ├── { depth = 1, weight = 3 }
+    │   │       │   │   │   ├── { len = 3, data = 'guy'}
+    │   │       │   │   │   └── nil
+    │   │       │   │   └── nil
+    │   │       │   └── { depth = 1, weight = 1 }
+    │   │       │       ├── { len = 1, data = 's'}
+    │   │       │       └── { len = 5, data = ' all '}
+    │   │       └── { len = 19, data = 'five fighting over '}
+    │   └── { depth = 3, weight = 14 }
+    │       ├── { depth = 2, weight = 14 }
+    │       │   ├── { depth = 1, weight = 14 }
+    │       │   │   ├── { len = 14, data = 'who's gonna be'}
+    │       │   │   └── nil
+    │       │   └── nil
+    │       └── nil
+    └── { depth = 9, weight = 2 }
+        ├── { depth = 1, weight = 1 }
+        │   ├── { len = 1, data = ' '}
+        │   └── { len = 1, data = 'M'}
+        └── { depth = 8, weight = 3 }
+            ├── { len = 3, data = 'r. '}
+            └── { depth = 7, weight = 17 }
+                ├── { depth = 6, weight = 5 }
+                │   ├── { len = 5, data = 'Black'}
+                │   └── { depth = 1, weight = 12 }
+                │       ├── { len = 12, data = ', but they, '}
+                │       └── nil
+                └── { depth = 4, weight = 21 }
+                    ├── { len = 21, data = 'don't know each other'}
+                    └── { depth = 3, weight = 25 }
+                        ├── { len = 25, data = ', so nobody wants to back'}
+                        └── { depth = 1, weight = 5 }
+                            ├── { len = 5, data = ' down'}
+                            └── nil
+
+extract pos = 130
+sym = 'n'
+test (size = 131, balance = 0) = 'You got four or guys all five fighting over who's gonna be Mr. Black, but they, don't know each other, so nobody wants to back down'
+└── { depth = 11, weight = 130 }
+    ├── { depth = 10, weight = 58 }
+    │   ├── { depth = 6, weight = 44 }
+    │   │   ├── { depth = 5, weight = 16 }
+    │   │   │   ├── { depth = 4, weight = 6 }
+    │   │   │   │   ├── { depth = 3, weight = 5 }
+    │   │   │   │   │   ├── { depth = 2, weight = 5 }
+    │   │   │   │   │   │   ├── { depth = 1, weight = 1 }
+    │   │   │   │   │   │   │   ├── { len = 1, data = 'Y'}
+    │   │   │   │   │   │   │   └── { len = 4, data = 'ou g'}
+    │   │   │   │   │   │   └── nil
+    │   │   │   │   │   └── { len = 1, data = 'o'}
+    │   │   │   │   └── { len = 10, data = 't four or '}
+    │   │   │   └── { depth = 4, weight = 9 }
+    │   │   │       ├── { depth = 3, weight = 3 }
+    │   │   │       │   ├── { depth = 2, weight = 3 }
+    │   │   │       │   │   ├── { depth = 1, weight = 3 }
+    │   │   │       │   │   │   ├── { len = 3, data = 'guy'}
+    │   │   │       │   │   │   └── nil
+    │   │   │       │   │   └── nil
+    │   │   │       │   └── { depth = 1, weight = 1 }
+    │   │   │       │       ├── { len = 1, data = 's'}
+    │   │   │       │       └── { len = 5, data = ' all '}
+    │   │   │       └── { len = 19, data = 'five fighting over '}
+    │   │   └── { depth = 3, weight = 14 }
+    │   │       ├── { depth = 2, weight = 14 }
+    │   │       │   ├── { depth = 1, weight = 14 }
+    │   │       │   │   ├── { len = 14, data = 'who's gonna be'}
+    │   │       │   │   └── nil
+    │   │       │   └── nil
+    │   │       └── nil
+    │   └── { depth = 9, weight = 2 }
+    │       ├── { depth = 1, weight = 1 }
+    │       │   ├── { len = 1, data = ' '}
+    │       │   └── { len = 1, data = 'M'}
+    │       └── { depth = 8, weight = 3 }
+    │           ├── { len = 3, data = 'r. '}
+    │           └── { depth = 7, weight = 17 }
+    │               ├── { depth = 6, weight = 5 }
+    │               │   ├── { len = 5, data = 'Black'}
+    │               │   └── { depth = 1, weight = 12 }
+    │               │       ├── { len = 12, data = ', but they, '}
+    │               │       └── nil
+    │               └── { depth = 4, weight = 21 }
+    │                   ├── { len = 21, data = 'don't know each other'}
+    │                   └── { depth = 3, weight = 25 }
+    │                       ├── { len = 25, data = ', so nobody wants to back'}
+    │                       └── { depth = 1, weight = 4 }
+    │                           ├── { len = 4, data = ' dow'}
+    │                           └── nil
+    └── { len = 1, data = 'n'}
+
