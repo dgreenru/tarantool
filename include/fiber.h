@@ -107,16 +107,16 @@ void fiber_io_wait(int fd, int events);
 
 void
 fiber_yield(void);
-void fiber_destroy_all();
 
-bool
-fiber_is_caller(struct fiber *f);
+void
+fiber_yield_to(struct fiber *f);
+
+void fiber_destroy_all();
 
 const char *fiber_peer_name(struct fiber *fiber);
 u64 fiber_peer_cookie(struct fiber *fiber);
 
 bool fiber_gc(void);
-bool fiber_checkstack();
 void fiber_call(struct fiber *callee);
 void fiber_wakeup(struct fiber *f);
 struct fiber *fiber_find(int fid);
