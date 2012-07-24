@@ -60,7 +60,6 @@ remote_row_reader_v11()
 		return NULL;
 	}
 
-	say_warn("read row bytes:%" PRI_SSZ, request_len);
 	return tbuf_split(fiber->rbuf, request_len);
 }
 
