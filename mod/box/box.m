@@ -438,7 +438,7 @@ mod_reload_config(struct tarantool_cfg *old_conf, struct tarantool_cfg *new_conf
 @implementation BoxPrimaryService
 
 static void
-iproto_primary_handler(struct vbuf *vbuf, u32 op, struct tbuf *request)
+iproto_primary_handler(struct iov_buf *vbuf, u32 op, struct tbuf *request)
 {
 	struct port *port = port_create(&port_iproto_vtab, vbuf);
 	box_process(txn_begin(), port, op, request);
@@ -464,7 +464,7 @@ iproto_primary_handler(struct vbuf *vbuf, u32 op, struct tbuf *request)
 @implementation BoxSecondaryService
 
 static void
-iproto_secondary_handler(struct vbuf *vbuf, u32 op, struct tbuf *request)
+iproto_secondary_handler(struct iov_buf *vbuf, u32 op, struct tbuf *request)
 {
 	struct port *port = port_create(&port_iproto_vtab, vbuf);
 	box_process_ro(txn_begin(), port, op, request);

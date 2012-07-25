@@ -33,7 +33,7 @@
 #include <palloc.h>
 #include <fiber.h>
 #include <tbuf.h>
-#include <vbuf.h>
+#include <iov_buf.h>
 #include <say.h>
 
 const uint32_t msg_ping = 0xff00;
@@ -325,7 +325,7 @@ struct batch
 {
 	struct inbuf *inbuf;
 
-	struct vbuf outbuf;
+	struct iov_buf outbuf;
 	int outbuf_start;
 	int outbuf_count;
 
@@ -362,10 +362,10 @@ batch_process_msg(struct batch *batch)
 
 	if (unlikely(reply->msg_code == msg_ping)) {
 		reply->len = 0;
-		vbuf_add(&batch->outbuf, reply, sizeof(struct iproto_header));
+		iov_add(&batch->outbuf, reply, sizeof(struct iproto_header));
 	} else {
 		reply->len = sizeof(uint32_t); /* ret_code */
-		vbuf_add(&batch->outbuf, reply, sizeof(struct iproto_header_retcode));
+		iov_add(&batch->outbuf, reply, sizeof(struct iproto_header_retcode));
 		size_t saved_iov_cnt = batch->outbuf.iov_cnt;
 		@try {
 			/* make request point to iproto data */
@@ -387,7 +387,7 @@ batch_process_msg(struct batch *batch)
 				(batch->outbuf.iov_cnt - saved_iov_cnt)
 					* sizeof(struct iovec);
 			batch->outbuf.iov_cnt = saved_iov_cnt;
-			vbuf_dup(&batch->outbuf, e->errmsg, strlen(e->errmsg) + 1);
+			iov_dup(&batch->outbuf, e->errmsg, strlen(e->errmsg) + 1);
 		}
 		for (; saved_iov_cnt < batch->outbuf.iov_cnt; saved_iov_cnt++) {
 			reply->len += iovec(&batch->outbuf)[saved_iov_cnt].iov_len;
@@ -526,7 +526,7 @@ batch_output_handler(ev_io *watcher, int revents __attribute__((unused)))
 {
 	IProtoConnection *conn = (IProtoConnection *) watcher->data;
 	struct batch *batch = conn->batch;
-	struct vbuf *vbuf = &batch->outbuf;
+	struct iov_buf *vbuf = &batch->outbuf;
 
 	@try {
 		if (batch->outbuf_count) {
@@ -539,8 +539,8 @@ batch_output_handler(ev_io *watcher, int revents __attribute__((unused)))
 		if (batch->outbuf_start == vbuf->iov_cnt) {
 			assert(batch->outbuf_count == 0);
 			batch->outbuf_start = 0;
-			vbuf_clear(vbuf, true);
-			vbuf_ensure(&batch->outbuf, 1024);
+			iov_clear(vbuf, true);
+			iov_ensure(&batch->outbuf, 1024);
 #if 1
 			if (!batch->running && batch->inbuf->count == 0) {
 				conn_stop_output(conn);
@@ -597,8 +597,8 @@ batch_create(void)
 	}
 
 	batch->pool = palloc_create_pool("");
-	vbuf_setup(&batch->outbuf, batch->pool);
-	vbuf_ensure(&batch->outbuf, 1024);
+	iov_setup(&batch->outbuf, batch->pool);
+	iov_ensure(&batch->outbuf, 1024);
 
 	return batch;
 }

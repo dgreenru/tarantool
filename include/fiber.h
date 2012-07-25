@@ -35,7 +35,7 @@
 
 #include <tarantool_ev.h>
 #include <tbuf.h>
-#include <vbuf.h>
+#include <iov_buf.h>
 #include <coro.h>
 #include <util.h>
 #include "third_party/queue.h"

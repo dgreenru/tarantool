@@ -27,20 +27,20 @@
  * SUCH DAMAGE.
  */
 
-#include <vbuf.h>
+#include <iov_buf.h>
 #include <net_io.h>
 
-struct vbuf_cleanup
+struct iov_cleanup
 {
-	vbuf_cleanup_cb cb;
-	void *data;
+	iov_cleanup_cb cb;
+	void *cb_arg;
 };
 
 /**
  * Initialize a new iov vector buffer.
  */
 void
-vbuf_setup(struct vbuf *vbuf, struct palloc_pool *pool)
+iov_setup(struct iov_buf *vbuf, struct palloc_pool *pool)
 {
 	vbuf->pool = pool;
 	vbuf->iov = tbuf_alloc(vbuf->pool);
@@ -52,9 +52,9 @@ vbuf_setup(struct vbuf *vbuf, struct palloc_pool *pool)
  * Register a cleanup callbacks.
  */
 void
-vbuf_register_cleanup(struct vbuf *vbuf, vbuf_cleanup_cb cb, void *data)
+iov_register_cleanup(struct iov_buf *vbuf, iov_cleanup_cb cb, void *cb_arg)
 {
-	struct vbuf_cleanup vc = { .cb = cb, .data = data };
+	struct iov_cleanup vc = { .cb = cb, .cb_arg = cb_arg };
 	tbuf_append(vbuf->cleanup, &vc, sizeof(vc));
 }
 
@@ -62,13 +62,13 @@ vbuf_register_cleanup(struct vbuf *vbuf, vbuf_cleanup_cb cb, void *data)
  * Clear the iov vector invoking the registered cleanup callbacks.
  */
 void
-vbuf_clear(struct vbuf *vbuf, bool release)
+iov_clear(struct iov_buf *vbuf, bool release)
 {
 	/* Invoke the callbacks. */
-	struct vbuf_cleanup *cleanup = vbuf->cleanup->data;
-	int i = vbuf->cleanup->size / sizeof(struct vbuf_cleanup);
+	struct iov_cleanup *cleanup = vbuf->cleanup->data;
+	int i = vbuf->cleanup->size / sizeof(struct iov_cleanup);
 	while (i-- > 0) {
-		cleanup->cb(cleanup->data);
+		cleanup->cb(cleanup->cb_arg);
 		cleanup++;
 	}
 
@@ -88,13 +88,13 @@ vbuf_clear(struct vbuf *vbuf, bool release)
  * Write the iov vector to the connection. Clear it after writing.
  */
 void
-vbuf_flush(struct vbuf *vbuf, CoConnection *conn, bool release)
+iov_flush(struct iov_buf *vbuf, CoConnection *conn, bool release)
 {
 	@try {
 		struct iovec *iov = iovec(vbuf);
 		[conn coWriteV: iov :vbuf->iov_cnt];
 	}
 	@finally {
-		vbuf_clear(vbuf, release);
+		iov_clear(vbuf, release);
 	}
 }

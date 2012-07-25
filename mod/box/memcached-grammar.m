@@ -284,7 +284,7 @@ tr26:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple != NULL && !expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			else
 				STORE;
 		}
@@ -324,7 +324,7 @@ tr30:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple != NULL && !expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			else
 				STORE;
 		}
@@ -366,7 +366,7 @@ tr39:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple != NULL && !expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			else
 				STORE;
 		}
@@ -412,7 +412,7 @@ tr58:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST) {
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			} else {
 				value = tuple_field(tuple, 3);
 				value_len = load_varint32(&value);
@@ -470,7 +470,7 @@ tr62:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST) {
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			} else {
 				value = tuple_field(tuple, 3);
 				value_len = load_varint32(&value);
@@ -530,7 +530,7 @@ tr71:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST) {
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			} else {
 				value = tuple_field(tuple, 3);
 				value_len = load_varint32(&value);
@@ -586,9 +586,9 @@ tr91:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			else if (meta(tuple)->cas != cas)
-				vbuf_add(conn->wbuf, "EXISTS\r\n", 8);
+				iov_add(conn->wbuf, "EXISTS\r\n", 8);
 			else
 				STORE;
 		}
@@ -628,9 +628,9 @@ tr95:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			else if (meta(tuple)->cas != cas)
-				vbuf_add(conn->wbuf, "EXISTS\r\n", 8);
+				iov_add(conn->wbuf, "EXISTS\r\n", 8);
 			else
 				STORE;
 		}
@@ -672,9 +672,9 @@ tr105:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			else if (meta(tuple)->cas != cas)
-				vbuf_add(conn->wbuf, "EXISTS\r\n", 8);
+				iov_add(conn->wbuf, "EXISTS\r\n", 8);
 			else
 				STORE;
 		}
@@ -701,7 +701,7 @@ tr118:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			} else {
 				m = meta(tuple);
 				field = tuple_field(tuple, 3);
@@ -731,16 +731,16 @@ tr118:
 					@try {
 						store(key, exptime, flags, bytes, data);
 						stats.total_items++;
-						vbuf_add(conn->wbuf, b->data, b->size);
-						vbuf_add(conn->wbuf, "\r\n", 2);
+						iov_add(conn->wbuf, b->data, b->size);
+						iov_add(conn->wbuf, "\r\n", 2);
 					}
 					@catch (ClientError *e) {
-						vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
-						vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
-						vbuf_add(conn->wbuf, "\r\n", 2);
+						iov_add(conn->wbuf, "SERVER_ERROR ", 13);
+						iov_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+						iov_add(conn->wbuf, "\r\n", 2);
 					}
 				} else {
-					vbuf_add(conn->wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", 62);
+					iov_add(conn->wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", 62);
 				}
 			}
 
@@ -766,7 +766,7 @@ tr122:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			} else {
 				m = meta(tuple);
 				field = tuple_field(tuple, 3);
@@ -796,16 +796,16 @@ tr122:
 					@try {
 						store(key, exptime, flags, bytes, data);
 						stats.total_items++;
-						vbuf_add(conn->wbuf, b->data, b->size);
-						vbuf_add(conn->wbuf, "\r\n", 2);
+						iov_add(conn->wbuf, b->data, b->size);
+						iov_add(conn->wbuf, "\r\n", 2);
 					}
 					@catch (ClientError *e) {
-						vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
-						vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
-						vbuf_add(conn->wbuf, "\r\n", 2);
+						iov_add(conn->wbuf, "SERVER_ERROR ", 13);
+						iov_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+						iov_add(conn->wbuf, "\r\n", 2);
 					}
 				} else {
-					vbuf_add(conn->wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", 62);
+					iov_add(conn->wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", 62);
 				}
 			}
 
@@ -833,7 +833,7 @@ tr132:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			} else {
 				m = meta(tuple);
 				field = tuple_field(tuple, 3);
@@ -863,16 +863,16 @@ tr132:
 					@try {
 						store(key, exptime, flags, bytes, data);
 						stats.total_items++;
-						vbuf_add(conn->wbuf, b->data, b->size);
-						vbuf_add(conn->wbuf, "\r\n", 2);
+						iov_add(conn->wbuf, b->data, b->size);
+						iov_add(conn->wbuf, "\r\n", 2);
 					}
 					@catch (ClientError *e) {
-						vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
-						vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
-						vbuf_add(conn->wbuf, "\r\n", 2);
+						iov_add(conn->wbuf, "SERVER_ERROR ", 13);
+						iov_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+						iov_add(conn->wbuf, "\r\n", 2);
 					}
 				} else {
-					vbuf_add(conn->wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", 62);
+					iov_add(conn->wbuf, "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", 62);
 				}
 			}
 
@@ -892,16 +892,16 @@ tr141:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			} else {
 				@try {
 					delete(key);
-					vbuf_add(conn->wbuf, "DELETED\r\n", 9);
+					iov_add(conn->wbuf, "DELETED\r\n", 9);
 				}
 				@catch (ClientError *e) {
-					vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
-					vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
-					vbuf_add(conn->wbuf, "\r\n", 2);
+					iov_add(conn->wbuf, "SERVER_ERROR ", 13);
+					iov_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+					iov_add(conn->wbuf, "\r\n", 2);
 				}
 			}
 		}
@@ -926,16 +926,16 @@ tr146:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			} else {
 				@try {
 					delete(key);
-					vbuf_add(conn->wbuf, "DELETED\r\n", 9);
+					iov_add(conn->wbuf, "DELETED\r\n", 9);
 				}
 				@catch (ClientError *e) {
-					vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
-					vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
-					vbuf_add(conn->wbuf, "\r\n", 2);
+					iov_add(conn->wbuf, "SERVER_ERROR ", 13);
+					iov_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+					iov_add(conn->wbuf, "\r\n", 2);
 				}
 			}
 		}
@@ -956,16 +956,16 @@ tr157:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || tuple->flags & GHOST || expired(tuple)) {
-				vbuf_add(conn->wbuf, "NOT_FOUND\r\n", 11);
+				iov_add(conn->wbuf, "NOT_FOUND\r\n", 11);
 			} else {
 				@try {
 					delete(key);
-					vbuf_add(conn->wbuf, "DELETED\r\n", 9);
+					iov_add(conn->wbuf, "DELETED\r\n", 9);
 				}
 				@catch (ClientError *e) {
-					vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
-					vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
-					vbuf_add(conn->wbuf, "\r\n", 2);
+					iov_add(conn->wbuf, "SERVER_ERROR ", 13);
+					iov_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+					iov_add(conn->wbuf, "\r\n", 2);
 				}
 			}
 		}
@@ -988,7 +988,7 @@ tr169:
 					fiber_call(f);
 			} else
 				flush_all((void *)0);
-			vbuf_add(conn->wbuf, "OK\r\n", 4);
+			iov_add(conn->wbuf, "OK\r\n", 4);
 		}
 	goto st197;
 tr174:
@@ -1011,7 +1011,7 @@ tr174:
 					fiber_call(f);
 			} else
 				flush_all((void *)0);
-			vbuf_add(conn->wbuf, "OK\r\n", 4);
+			iov_add(conn->wbuf, "OK\r\n", 4);
 		}
 	goto st197;
 tr185:
@@ -1034,7 +1034,7 @@ tr185:
 					fiber_call(f);
 			} else
 				flush_all((void *)0);
-			vbuf_add(conn->wbuf, "OK\r\n", 4);
+			iov_add(conn->wbuf, "OK\r\n", 4);
 		}
 	goto st197;
 tr195:
@@ -1051,10 +1051,10 @@ tr195:
 			@try {
 				memcached_get(conn, keys_count, keys, show_cas);
 			} @catch (ClientError *e) {
-				vbuf_clear(conn->wbuf, false);
-				vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);
-				vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
-				vbuf_add(conn->wbuf, "\r\n", 2);
+				iov_clear(conn->wbuf, false);
+				iov_add(conn->wbuf, "SERVER_ERROR ", 13);
+				iov_add(conn->wbuf, e->errmsg, strlen(e->errmsg));
+				iov_add(conn->wbuf, "\r\n", 2);
 			}
 		}
 	goto st197;
@@ -1109,7 +1109,7 @@ tr233:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			else
 				STORE;
 		}
@@ -1149,7 +1149,7 @@ tr237:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			else
 				STORE;
 		}
@@ -1191,7 +1191,7 @@ tr246:
 			key = read_field(keys);
 			struct tuple *tuple = find(key);
 			if (tuple == NULL || expired(tuple))
-				vbuf_add(conn->wbuf, "NOT_STORED\r\n", 12);
+				iov_add(conn->wbuf, "NOT_STORED\r\n", 12);
 			else
 				STORE;
 		}
@@ -3634,14 +3634,14 @@ case 196:
 		if (pe - p > (1 << 20)) {
 		exit:
 			say_warn("memcached proto error");
-			vbuf_add(conn->wbuf, "ERROR\r\n", 7);
+			iov_add(conn->wbuf, "ERROR\r\n", 7);
 			stats.bytes_written += 7;
 			return -1;
 		}
 		char *r;
 		if ((r = memmem(p, pe - p, "\r\n", 2)) != NULL) {
 			tbuf_peek(fiber->rbuf, r + 2 - (char *)fiber->rbuf->data);
-			vbuf_add(conn->wbuf,
+			iov_add(conn->wbuf,
 				 "CLIENT_ERROR bad command line format\r\n", 38);
 			return 1;
 		}

@@ -39,7 +39,7 @@ struct tarantool_cfg;
 
 @interface MemcachedConnection: ServiceConnection {
 @public
-	struct vbuf *wbuf;
+	struct iov_buf *wbuf;
 }
 @end
 

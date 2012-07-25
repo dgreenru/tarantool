@@ -202,7 +202,7 @@ print_stats(MemcachedConnection *conn)
 	tbuf_printf(out, "STAT limit_maxbytes %"PRIu64"\r\n", (u64)(cfg.slab_alloc_arena * (1 << 30)));
 	tbuf_printf(out, "STAT threads 1\r\n");
 	tbuf_printf(out, "END\r\n");
-	vbuf_add(conn->wbuf, out->data, out->size);
+	iov_add(conn->wbuf, out->data, out->size);
 }
 
 void
@@ -213,7 +213,7 @@ memcached_get(MemcachedConnection *conn,
 	stat_collect(stat_base, MEMC_GET, 1);
 	stats.cmd_get++;
 	say_debug("ensuring space for %"PRI_SZ" keys", keys_count);
-	vbuf_ensure(conn->wbuf, keys_count * 5 + 1);
+	iov_ensure(conn->wbuf, keys_count * 5 + 1);
 	while (keys_count-- > 0) {
 		struct tuple *tuple;
 		struct meta *m;
@@ -268,18 +268,18 @@ memcached_get(MemcachedConnection *conn,
 		if (show_cas) {
 			struct tbuf *b = tbuf_alloc(fiber->gc_pool);
 			tbuf_printf(b, "VALUE %.*s %"PRIu32" %"PRIu32" %"PRIu64"\r\n", key_len, (u8 *)key, m->flags, value_len, m->cas);
-			vbuf_add_unsafe(conn->wbuf, b->data, b->size);
+			iov_add_unsafe(conn->wbuf, b->data, b->size);
 			stats.bytes_written += b->size;
 		} else {
-			vbuf_add_unsafe(conn->wbuf, "VALUE ", 6);
-			vbuf_add_unsafe(conn->wbuf, key, key_len);
-			vbuf_add_unsafe(conn->wbuf, suffix, suffix_len);
+			iov_add_unsafe(conn->wbuf, "VALUE ", 6);
+			iov_add_unsafe(conn->wbuf, key, key_len);
+			iov_add_unsafe(conn->wbuf, suffix, suffix_len);
 		}
-		vbuf_add_unsafe(conn->wbuf, value, value_len);
-		vbuf_add_unsafe(conn->wbuf, "\r\n", 2);
+		iov_add_unsafe(conn->wbuf, value, value_len);
+		iov_add_unsafe(conn->wbuf, "\r\n", 2);
 		stats.bytes_written += value_len + 2;
 	}
-	vbuf_add_unsafe(conn->wbuf, "END\r\n", 5);
+	iov_add_unsafe(conn->wbuf, "END\r\n", 5);
 	stats.bytes_written += 5;
 }
 
@@ -301,18 +301,18 @@ flush_all(void *data)
 do {										\
 	stats.cmd_set++;							\
 	if (bytes > (1<<20)) {							\
-		vbuf_add(conn->wbuf,						\
+		iov_add(conn->wbuf,						\
 			 "SERVER_ERROR object too large for cache\r\n", 41);	\
 	} else {								\
 		@try {								\
 			store(key, exptime, flags, bytes, data);		\
 			stats.total_items++;					\
-			vbuf_add(conn->wbuf, "STORED\r\n", 8);			\
+			iov_add(conn->wbuf, "STORED\r\n", 8);			\
 		}								\
 		@catch (ClientError *e) {					\
-			vbuf_add(conn->wbuf, "SERVER_ERROR ", 13);		\
-			vbuf_add(conn->wbuf, e->errmsg, strlen(e->errmsg));	\
-			vbuf_add(conn->wbuf, "\r\n", 2);			\
+			iov_add(conn->wbuf, "SERVER_ERROR ", 13);		\
+			iov_add(conn->wbuf, e->errmsg, strlen(e->errmsg));	\
+			iov_add(conn->wbuf, "\r\n", 2);			\
 		}								\
 	}									\
 } while (0)
@@ -331,8 +331,8 @@ memcached_loop(MemcachedConnection *conn)
 			break;
 
 		if (conn->wbuf == NULL) {
-			conn->wbuf = palloc(fiber->gc_pool, sizeof(struct vbuf));
-			vbuf_setup(conn->wbuf, fiber->gc_pool);
+			conn->wbuf = palloc(fiber->gc_pool, sizeof(struct iov_buf));
+			iov_setup(conn->wbuf, fiber->gc_pool);
 		}
 
 	dispatch:
@@ -352,7 +352,7 @@ memcached_loop(MemcachedConnection *conn)
 				goto dispatch;
 		}
 
-		vbuf_flush(conn->wbuf, conn, false);
+		iov_flush(conn->wbuf, conn, false);
 		if (fiber_gc()) {
 			conn->wbuf = NULL;
 		}
@@ -374,7 +374,7 @@ memcached_handler(MemcachedConnection *conn)
 
 	@try {
 		memcached_loop(conn);
-		vbuf_flush(conn->wbuf, conn, false);
+		iov_flush(conn->wbuf, conn, false);
 	}
 	@catch (SocketError *e) {
 		[e log];

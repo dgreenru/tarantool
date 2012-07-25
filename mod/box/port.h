@@ -34,7 +34,7 @@
 #include <util.h>
 #import "object.h"
 
-struct vbuf;
+struct iov_buf;
 struct tuple;
 struct lua_State;
 
@@ -57,7 +57,7 @@ struct port
  * Is internal to port_iproto implementation, but is also
  * used in memcached.m bypassing PortIproto.
  */
-void tuple_guard(struct vbuf *wbuf, struct tuple *tuple);
+void tuple_guard(struct iov_buf *wbuf, struct tuple *tuple);
 
 /**
  * Create a port instance.

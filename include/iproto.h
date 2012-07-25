@@ -64,7 +64,7 @@ static inline struct iproto_header *iproto(const struct tbuf *t)
 }
 
 
-typedef void (*iproto_handler)(struct vbuf *vbuf,
+typedef void (*iproto_handler)(struct iov_buf *vbuf,
 			       uint32_t msg_code,
 			       struct tbuf *request);
 

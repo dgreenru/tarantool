@@ -31,7 +31,7 @@
 #include <fiber.h>
 #include <tarantool_lua.h>
 #include "tuple.h"
-#include <vbuf.h>
+#include <iov_buf.h>
 #include "box_lua.h"
 #include "lua.h"
 #include "lauxlib.h"
@@ -62,10 +62,10 @@ tuple_unref(void *tuple)
 }
 
 void
-tuple_guard(struct vbuf *wbuf, struct tuple *tuple)
+tuple_guard(struct iov_buf *wbuf, struct tuple *tuple)
 {
 	tuple_ref(tuple, 1);
-	vbuf_register_cleanup(wbuf, tuple_unref, tuple);
+	iov_register_cleanup(wbuf, tuple_unref, tuple);
 }
 
 u32*
@@ -96,29 +96,29 @@ port_null_add_lua_multret(void *data __attribute__((unused)),
 static u32*
 port_iproto_add_u32(void *data)
 {
-	struct vbuf *vbuf = data;
+	struct iov_buf *vbuf = data;
 	u32 *p_u32 = palloc(vbuf->pool, sizeof(u32));
-	vbuf_add(vbuf, p_u32, sizeof(u32));
+	iov_add(vbuf, p_u32, sizeof(u32));
 	return p_u32;
 }
 
 static void
 port_iproto_dup_u32(void *data, u32 num)
 {
-	struct vbuf *vbuf = data;
-	vbuf_dup(vbuf, &num, sizeof(u32));
+	struct iov_buf *vbuf = data;
+	iov_dup(vbuf, &num, sizeof(u32));
 }
 
 static void
 port_iproto_add_tuple(void *data, struct tuple *tuple)
 {
-	struct vbuf *vbuf = data;
+	struct iov_buf *vbuf = data;
 	size_t len = tuple_len(tuple);
 	if (len > BOX_REF_THRESHOLD) {
 		tuple_guard(vbuf, tuple);
-		vbuf_add(vbuf, &tuple->bsize, len);
+		iov_add(vbuf, &tuple->bsize, len);
 	} else {
-		vbuf_dup(vbuf, &tuple->bsize, len);
+		iov_dup(vbuf, &tuple->bsize, len);
 	}
 }
 
@@ -126,7 +126,7 @@ port_iproto_add_tuple(void *data, struct tuple *tuple)
  * overhead as possible. */
 
 static void
-add_lua_table(struct vbuf *wbuf, struct lua_State *L, int index)
+add_lua_table(struct iov_buf *wbuf, struct lua_State *L, int index)
 {
 	u32 *field_count = palloc(wbuf->pool, sizeof(u32));
 	u32 *tuple_len = palloc(wbuf->pool, sizeof(u32));
@@ -134,8 +134,8 @@ add_lua_table(struct vbuf *wbuf, struct lua_State *L, int index)
 	*field_count = 0;
 	*tuple_len = 0;
 
-	vbuf_add(wbuf, tuple_len, sizeof(u32));
-	vbuf_add(wbuf, field_count, sizeof(u32));
+	iov_add(wbuf, tuple_len, sizeof(u32));
+	iov_add(wbuf, field_count, sizeof(u32));
 
 	u8 field_len_buf[5];
 	size_t field_len, field_len_len;
@@ -153,8 +153,8 @@ add_lua_table(struct vbuf *wbuf, struct lua_State *L, int index)
 			field_len_len =
 				save_varint32(field_len_buf,
 					      field_len) - field_len_buf;
-			vbuf_dup(wbuf, field_len_buf, field_len_len);
-			vbuf_dup(wbuf, &field_num, field_len);
+			iov_dup(wbuf, field_len_buf, field_len_len);
+			iov_dup(wbuf, &field_num, field_len);
 			*tuple_len += field_len_len + field_len;
 			break;
 		}
@@ -165,8 +165,8 @@ add_lua_table(struct vbuf *wbuf, struct lua_State *L, int index)
 			field_len_len =
 				save_varint32(field_len_buf,
 					      field_len) - field_len_buf;
-			vbuf_dup(wbuf, field_len_buf, field_len_len);
-			vbuf_dup(wbuf, &field_num, field_len);
+			iov_dup(wbuf, field_len_buf, field_len_len);
+			iov_dup(wbuf, &field_num, field_len);
 			*tuple_len += field_len_len + field_len;
 			break;
 		}
@@ -176,8 +176,8 @@ add_lua_table(struct vbuf *wbuf, struct lua_State *L, int index)
 			field_len_len =
 				save_varint32(field_len_buf,
 					      field_len) - field_len_buf;
-			vbuf_dup(wbuf, field_len_buf, field_len_len);
-			vbuf_dup(wbuf, field, field_len);
+			iov_dup(wbuf, field_len_buf, field_len_len);
+			iov_dup(wbuf, field, field_len);
 			*tuple_len += field_len_len + field_len;
 			break;
 		}
@@ -191,7 +191,7 @@ add_lua_table(struct vbuf *wbuf, struct lua_State *L, int index)
 }
 
 static void
-add_ret(struct vbuf *wbuf, struct lua_State *L, int index)
+add_ret(struct iov_buf *wbuf, struct lua_State *L, int index)
 {
 	int type = lua_type(L, index);
 	struct tuple *tuple;
@@ -252,7 +252,7 @@ add_ret(struct vbuf *wbuf, struct lua_State *L, int index)
 		break;
 	}
 	tuple_guard(wbuf, tuple);
-	vbuf_add(wbuf, &tuple->bsize, tuple_len(tuple));
+	iov_add(wbuf, &tuple->bsize, tuple_len(tuple));
 }
 
 /**
@@ -266,9 +266,9 @@ add_ret(struct vbuf *wbuf, struct lua_State *L, int index)
 static void
 port_iproto_add_lua_multret(void *data, struct lua_State *L)
 {
-	struct vbuf *vbuf = data;
+	struct iov_buf *vbuf = data;
 	int nargs = lua_gettop(L);
-	vbuf_dup(vbuf, &nargs, sizeof(u32));
+	iov_dup(vbuf, &nargs, sizeof(u32));
 	for (int i = 1; i <= nargs; ++i)
 		add_ret(vbuf, L, i);
 }

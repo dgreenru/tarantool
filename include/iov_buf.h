@@ -1,5 +1,5 @@
-#ifndef TARANTOOL_VBUF_H_INCLUDED
-#define TARANTOOL_VBUF_H_INCLUDED
+#ifndef TARANTOOL_IOV_BUF_H_INCLUDED
+#define TARANTOOL_IOV_BUF_H_INCLUDED
 /*
  * Redistribution and use in source and binary forms, with or
  * without modification, are permitted provided that the following
@@ -36,7 +36,7 @@
 
 @class CoConnection;
 
-struct vbuf
+struct iov_buf
 {
 	struct palloc_pool *pool;
 	struct tbuf *iov;
@@ -45,13 +45,13 @@ struct vbuf
 };
 
 static inline struct iovec *
-iovec(const struct vbuf *vbuf)
+iovec(const struct iov_buf *vbuf)
 {
 	return (struct iovec *) (vbuf->iov->data);
 }
 
 inline static void
-vbuf_add_unsafe(struct vbuf *vbuf, const void *buf, size_t len)
+iov_add_unsafe(struct iov_buf *vbuf, const void *buf, size_t len)
 {
 	struct iovec *v;
 	assert(vbuf->iov->capacity - vbuf->iov->size >= sizeof(*v));
@@ -63,33 +63,34 @@ vbuf_add_unsafe(struct vbuf *vbuf, const void *buf, size_t len)
 }
 
 inline static void
-vbuf_ensure(struct vbuf *vbuf, size_t count)
+iov_ensure(struct iov_buf *vbuf, size_t count)
 {
 	tbuf_ensure(vbuf->iov, sizeof(struct iovec) * count);
 }
 
 /** Add data to the iov vector. */
 inline static void
-vbuf_add(struct vbuf *vbuf, const void *data, size_t len)
+iov_add(struct iov_buf *vbuf, const void *data, size_t len)
 {
-	vbuf_ensure(vbuf, 1);
-	vbuf_add_unsafe(vbuf, data, len);
+	iov_ensure(vbuf, 1);
+	iov_add_unsafe(vbuf, data, len);
 }
 
 /** Duplicate data and add to the iov vector. */
 inline static void
-vbuf_dup(struct vbuf *vbuf, const void *data, size_t len)
+iov_dup(struct iov_buf *vbuf, const void *data, size_t len)
 {
 	void *copy = palloc(vbuf->pool, len);
 	memcpy(copy, data, len);
-	vbuf_add(vbuf, copy, len);
+	iov_add(vbuf, copy, len);
 }
 
-void vbuf_setup(struct vbuf *vbuf, struct palloc_pool *pool);
-void vbuf_clear(struct vbuf *vbuf, bool release);
-void vbuf_flush(struct vbuf *vbuf, CoConnection *conn, bool release);
+void iov_setup(struct iov_buf *vbuf, struct palloc_pool *pool);
+void iov_clear(struct iov_buf *vbuf, bool release);
+void iov_flush(struct iov_buf *vbuf, CoConnection *conn, bool release);
 
-typedef void (*vbuf_cleanup_cb)(void *);
-void vbuf_register_cleanup(struct vbuf *vbuf, vbuf_cleanup_cb cb, void *data);
+typedef void (*iov_cleanup_cb)(void *);
+void iov_register_cleanup(struct iov_buf *vbuf,
+			   iov_cleanup_cb cb, void *data);
 
-#endif /* TARANTOOL_VBUF_H_INCLUDED */
+#endif /* TARANTOOL_IOV_BUF_H_INCLUDED */
