@@ -91,6 +91,6 @@ void iov_flush(struct iov_buf *vbuf, CoConnection *conn, bool release);
 
 typedef void (*iov_cleanup_cb)(void *);
 void iov_register_cleanup(struct iov_buf *vbuf,
-			   iov_cleanup_cb cb, void *data);
+			  iov_cleanup_cb cb, void *data);
 
 #endif /* TARANTOOL_IOV_BUF_H_INCLUDED */

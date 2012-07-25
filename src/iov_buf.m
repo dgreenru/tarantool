@@ -66,8 +66,9 @@ iov_clear(struct iov_buf *vbuf, bool release)
 {
 	/* Invoke the callbacks. */
 	struct iov_cleanup *cleanup = vbuf->cleanup->data;
-	int i = vbuf->cleanup->size / sizeof(struct iov_cleanup);
-	while (i-- > 0) {
+	struct iov_cleanup *end = cleanup +
+		(vbuf->cleanup->size / sizeof(struct iov_cleanup));
+	while (cleanup < end) {
 		cleanup->cb(cleanup->cb_arg);
 		cleanup++;
 	}
