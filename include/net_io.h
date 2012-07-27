@@ -42,32 +42,6 @@ struct tbuf;
 @class ServiceConnection;
 
 
-@protocol TimerHandler
-- (void) onTimer;
-@end
-
-@protocol InputHandler
-- (void) onInput;
-@end
-
-@protocol OutputHandler
-- (void) onOutput;
-@end
-
-@protocol PreIOHandler
-- (void) preIO;
-@end
-
-@protocol PostIOHandler
-- (void) postIO;
-@end
-
-void ev_init_timer_handler(ev_timer *watcher, id<TimerHandler> handler);
-void ev_init_input_handler(ev_io *watcher, id<InputHandler> handler);
-void ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler);
-void ev_init_preio_handler(ev_check *watcher, id<PreIOHandler> handler);
-void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler);
-
 /** Read ahead size. */
 extern int net_io_readahead;
 
@@ -160,10 +134,11 @@ void conn_detach_worker(CoConnection *conn);
 /**
  * Connection Acceptor
  */
-@interface Acceptor: tnt_Object <TimerHandler, InputHandler> {
+@interface Acceptor: tnt_Object {
 	int listen_fd;
 	struct ev_timer timer_event;
 	struct ev_io accept_event;
+@public
 	struct service_config service_config;
 }
 
@@ -171,8 +146,6 @@ void conn_detach_worker(CoConnection *conn);
 - (void) close;
 - (void) start;
 - (void) stop;
-
-- (int) port;
 
 /* Extension points. */
 - (void) onBind;

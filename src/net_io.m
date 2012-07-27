@@ -39,74 +39,10 @@
 
 int net_io_readahead;
 
-/* {{{ Event Handlers. ********************************************/
-
-static void
-timer_cb(ev_watcher *watcher, int revents __attribute__((unused)))
+static inline int
+service_port(struct service_config *cfg)
 {
-	id <TimerHandler> handler = watcher->data;
-	[handler onTimer];
-}
-
-static void
-input_cb(ev_watcher *watcher, int revents __attribute__((unused)))
-{
-	id <InputHandler> handler = watcher->data;
-	[handler onInput];
-}
-
-static void
-output_cb(ev_watcher *watcher, int revents __attribute__((unused)))
-{
-	id <OutputHandler> handler = watcher->data;
-	[handler onOutput];
-}
-
-static void
-preio_cb(ev_watcher *watcher, int revents __attribute__((unused)))
-{
-	id <PreIOHandler> handler = watcher->data;
-	[handler preIO];
-}
-
-static void
-postio_cb(ev_watcher *watcher, int revents __attribute__((unused)))
-{
-	id <PostIOHandler> handler = watcher->data;
-	[handler postIO];
-}
-
-void
-ev_init_timer_handler(ev_timer *watcher, id<TimerHandler> handler)
-{
-	watcher->data = handler;
-	ev_init(watcher, (void *) timer_cb);
-}
-
-void
-ev_init_input_handler(ev_io *watcher, id<InputHandler> handler)
-{
-	watcher->data = handler;
-	ev_init(watcher, (void *) input_cb);
-}
-
-void
-ev_init_output_handler(ev_io *watcher, id<OutputHandler> handler)
-{
-	watcher->data = handler;
-	ev_init(watcher, (void *) output_cb);
-}
-
-void ev_init_preio_handler(ev_check *watcher, id<PreIOHandler> handler)
-{
-	watcher->data = handler;
-	ev_init(watcher, (void *) preio_cb);
-}
-
-void ev_init_postio_handler(ev_prepare *watcher, id<PostIOHandler> handler)
-{
-	watcher->data = handler;
-	ev_init(watcher, (void *) postio_cb);
+	return ntohs(cfg->addr.sin_port);
 }
 
 /* }}} */
@@ -462,81 +398,120 @@ conn_detach_worker(CoConnection *conn)
 
 /* {{{ Connection Acceptor. ***************************************/
 
-/**
- * Bind the server socket and start listening.
- */
+@implementation Acceptor
+
 static int
-bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
+create_acceptor_socket(struct service_config *cfg)
 {
-	if (sock_bind(listen_fd, addr, sizeof(*addr)) < 0) {
-		return -1;
+	/* Create a socket. */
+	int fd = sock_create();
+
+	@try {
+		/* Set appropriate options. */
+		sock_set_blocking(fd, false);
+		sock_set_option(fd, SOL_SOCKET, SO_REUSEADDR);
+		sock_set_option(fd, SOL_SOCKET, SO_KEEPALIVE);
+		sock_reset_linger(fd);
+
+		/* Bind the socket and start listening. */
+		if (sock_bind(fd, &cfg->addr, sizeof(cfg->addr)) < 0
+		    || sock_listen(fd, cfg->listen_backlog) < 0) {
+			if (cfg->bind_retry) {
+				close(fd);
+				return -1;
+			}
+			tnt_raise(SocketError, :"bind/listen");
+		}
+
+		say_info("bound to port %i", service_port(cfg));
 	}
-	if (sock_listen(listen_fd, backlog) < 0) {
-		return -1;
+	@catch (SocketError *e) {
+		close(fd);
+		[e log];
+		say_error("Failed to init a server socket on port %i",
+			  service_port(cfg));
+		@throw;
 	}
-	return 0;
+
+	return fd;
 }
 
-@implementation Acceptor
+static bool
+bind_acceptor(Acceptor *acceptor)
+{
+	acceptor->listen_fd = create_acceptor_socket(&acceptor->service_config);
+
+	/* Notify a derived object on the bind event. */
+	@try {
+		[acceptor onBind];
+	}
+	@catch (...) {
+		[acceptor close];
+		@throw;
+	}
+
+	/* Register the socket with the event loop. */
+	ev_io_set(&acceptor->accept_event, acceptor->listen_fd, EV_READ);
+	ev_io_start(&acceptor->accept_event);
+
+	return true;
+}
+
+static void
+bind_timer_cb(ev_watcher *watcher, int revents __attribute__((unused)))
+{
+	Acceptor *acceptor = watcher->data;
+	assert(acceptor->listen_fd == -1);
+
+	if (bind_acceptor(acceptor)) {
+		ev_timer_stop(&acceptor->timer_event);
+	}
+}
+
+static void
+accept_cb(ev_watcher *watcher, int revents __attribute__((unused)))
+{
+	Acceptor *acceptor = watcher->data;
+	assert(acceptor->listen_fd >= 0);
+
+	int fd;
+	struct sockaddr_in addr;
+	socklen_t addrlen = sizeof(addr);
+	@try {
+		fd = sock_accept(acceptor->listen_fd, &addr, &addrlen);
+		if (fd < 0) {
+			return;
+		}
+	}
+	@catch (SocketError *e) {
+		[e log];
+		return;
+	}
+
+	/* Notify a derived object on the accept event. */
+	@try {
+		[acceptor onAccept: fd :&addr];
+	}
+	@catch (id) {
+		close(fd);
+	}
+}
 
 - (id) init: (struct service_config *)config
 {
 	self = [super init];
 	if (self) {
 		listen_fd = -1;
-		ev_init_timer_handler(&timer_event, self);
-		ev_init_input_handler(&accept_event, self);
+
+		timer_event.data = self;
+		ev_init(&timer_event, (void *) bind_timer_cb);
+
+		accept_event.data = self;
+		ev_init(&accept_event, (void *) accept_cb);
+
 		memcpy(&service_config, config, sizeof(service_config));
 	}
 	return self;
-}
-
-- (bool) bind
-{
-	@try {
-		/* Create a socket. */
-		listen_fd = sock_create();
-
-		/* Set appropriate options. */
-		sock_set_blocking(listen_fd, false);
-		sock_set_option(listen_fd, SOL_SOCKET, SO_REUSEADDR);
-		sock_set_option(listen_fd, SOL_SOCKET, SO_KEEPALIVE);
-		sock_reset_linger(listen_fd);
-
-		/* Try to bind the socket. */
-		if (bind_and_listen(listen_fd,
-				    &service_config.addr,
-				    service_config.listen_backlog) < 0) {
-			if (service_config.bind_retry) {
-				[self close];
-				return false;
-			}
-			tnt_raise(SocketError, :"bind/listen");
-		}
-		say_info("bound to port %i", [self port]);
-	}
-	@catch (SocketError *e) {
-		/* Failed to bind the socket. */
-		[self close];
-		[e log];
-		say_error("Failed to init a server socket on port %i", [self port]);
-		@throw;
-	}
-
-	/* Notify a derived object on the bind event. */
-	@try {
-		[self onBind];
-	}
-	@catch (id) {
-		[self close];
-		@throw;
-	}
-
-	/* Register the socket with the event loop. */
-	ev_io_set(&accept_event, listen_fd, EV_READ);
-	ev_io_start(&accept_event);
-
-	return true;
 }
 
 - (void) close
@@ -551,11 +526,13 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 {
 	assert(listen_fd == -1);
 
-	if (![self bind]) {
+	if (!bind_acceptor(self)) {
 		/* Retry mode, try again after delay. */
 		say_warn("port %i is already in use, will "
 			 "retry binding after %lf seconds.",
-			 [self port], service_config.bind_delay);
+			 service_port(&self->service_config),
+			 service_config.bind_delay);
+
 		ev_timer_set(&timer_event,
 			     service_config.bind_delay,
 			     service_config.bind_delay);
@@ -570,47 +547,6 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 	} else {
 		ev_io_stop(&accept_event);
 		[self close];
-	}
-}
-
-- (int) port
-{
-	return ntohs(service_config.addr.sin_port);
-}
-
-- (void) onTimer
-{
-	assert(listen_fd == -1);
-
-	if ([self bind]) {
-		ev_timer_stop(&timer_event);
-	}
-}
-
-- (void) onInput
-{
-	assert(listen_fd >= 0);
-
-	int fd;
-	struct sockaddr_in addr;
-	socklen_t addrlen = sizeof(addr);
-	@try {
-		fd = sock_accept(listen_fd, &addr, &addrlen);
-		if (fd < 0) {
-			return;
-		}
-	}
-	@catch (SocketError *e) {
-		[e log];
-		return;
-	}
-
-	/* Notify a derived object on the accept event. */
-	@try {
-		[self onAccept: fd :&addr];
-	}
-	@catch (id) {
-		close(fd);
 	}
 }
 
@@ -636,8 +572,8 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 {
 	self = [super init: config];
 	if (self) {
-		snprintf(service_name, sizeof(service_name),
-			 "%i/%s", [self port], name);
+		snprintf(service_name, sizeof(service_name), "%i/%s",
+			 service_port(&self->service_config), name);
 	}
 	return self;
 }
@@ -705,7 +641,8 @@ bind_and_listen(int listen_fd, struct sockaddr_in *addr, int backlog)
 		service = service_;
 
 		/* Set connection name. */
-		snprintf(name, sizeof(name), "%i/handler", [service port]);
+		snprintf(name, sizeof(name), "%i/handler",
+			 service_port(&service_->service_config));
 
 		/* Set default peer name. */
 		assert(strlen(DEFAULT_PEER) < sizeof(peer));

@@ -142,21 +142,29 @@ replication_relay_send_row(struct tbuf *t);
  * ------------------------------------------------------------------------
  */
 
-@interface ReplicaAcceptor: Acceptor <OutputHandler> {
+@interface ReplicaAcceptor: Acceptor {
 	int replica_sock;
 	ev_io send_event;
 }
-
+- (void) onOutput;
 @end
 
 @implementation ReplicaAcceptor
+
+static void
+output_cb(ev_watcher *watcher, int revents __attribute__((unused)))
+{
+	ReplicaAcceptor *acceptor = watcher->data;
+	[acceptor onOutput];
+}
 
 - (id) init: (struct service_config *)config
 {
 	self = [super init: config];
 	if (self) {
 		replica_sock = -1;
-		ev_init_output_handler(&send_event, self);
+		send_event.data = self;
+		ev_init(&send_event, (void *) output_cb);
 		ev_io_set(&send_event, master_to_spawner_sock, EV_WRITE);
 	}
 	return self;
