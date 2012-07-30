@@ -819,7 +819,6 @@ tree_iterator_free(struct iterator *iterator)
 @interface DenseTreeIndex: TreeIndex {
 	@public
 	u32 first_field;
-	bool is_linear;
 }
 @end
 
@@ -830,7 +829,6 @@ tree_iterator_free(struct iterator *iterator)
 	@public
 	u32 first_field;
 	u32 first_offset;
-	bool is_linear;
 }
 @end
 
@@ -858,15 +856,13 @@ tree_iterator_free(struct iterator *iterator)
 	[super free];
 }
 
-- (void) enable
+- (id) init: (struct key_def *) key_def_arg :(struct space *) space_arg
 {
-	memset(&tree, 0, sizeof tree);
-	if (index_is_primary(self)) {
-		sptree_index_init(&tree,
-				  [self node_size], NULL, 0, 0,
-				  [self key_node_cmp], [self node_cmp],
-				  self);
+	self = [super init: key_def_arg :space_arg];
+	if (self) {
+		memset(&tree, 0, sizeof tree);
 	}
+	return self;
 }
 
 - (size_t) size
@@ -974,6 +970,54 @@ tree_iterator_free(struct iterator *iterator)
 		it->base.next_equal = tree_iterator_reverse_next_equal;
 		sptree_index_iterator_reverse_init_set(&tree, &it->iter, &it->key_data);
 	}
+}
+
+- (void) beginBuild
+{
+	assert(index_is_primary(self));
+
+	tree.size = 0;
+	tree.max_size = 64;
+
+	size_t node_size = [self node_size];
+	size_t sz = tree.max_size * node_size;
+	tree.members = malloc(sz);
+	if (tree.members == NULL) {
+		panic("malloc(): failed to allocate %"PRI_SZ" bytes", sz);
+	}
+}
+
+- (void) buildNext: (struct tuple *) tuple
+{
+	size_t node_size = [self node_size];
+
+	if (tree.size == tree.max_size) {
+		tree.max_size *= 2;
+
+		size_t sz = tree.max_size * node_size;
+		tree.members = realloc(tree.members, sz);
+		if (tree.members == NULL) {
+			panic("malloc(): failed to allocate %"PRI_SZ" bytes", sz);
+		}
+	}
+
+	void *node = ((u8 *) tree.members + tree.size * node_size);
+	[self fold: node :tuple];
+	tree.size++;
+}
+
+- (void) endBuild
+{
+	assert(index_is_primary(self));
+
+	u32 n_tuples = tree.size;
+	u32 estimated_tuples = tree.max_size;
+	void *nodes = tree.members;
+
+	sptree_index_init(&tree,
+			  [self node_size], nodes, n_tuples, estimated_tuples,
+			  [self key_node_cmp], [self node_cmp],
+			  self);
 }
 
 - (void) build: (Index *) pk
@@ -1206,11 +1250,13 @@ linear_dense_key_node_cmp(const void *key, const void * node, void *arg)
 
 @implementation DenseTreeIndex
 
-- (void) enable
+- (id) init: (struct key_def *) key_def_arg :(struct space *) space_arg
 {
-	[super enable];
-	first_field = find_first_field(key_def);
-	is_linear = key_is_linear(key_def);
+	self = [super init: key_def_arg :space_arg];
+	if (self) {
+		first_field = find_first_field(key_def);
+	}
+	return self;
 }
 
 - (size_t) node_size
@@ -1220,17 +1266,23 @@ linear_dense_key_node_cmp(const void *key, const void * node, void *arg)
 
 - (tree_cmp_t) node_cmp
 {
-	return is_linear ? linear_dense_node_cmp : dense_node_cmp;
+	return key_is_linear(key_def)
+		? linear_dense_node_cmp
+		: dense_node_cmp;
 }
 
 - (tree_cmp_t) dup_node_cmp
 {
-	return is_linear ? linear_dense_dup_node_cmp : dense_dup_node_cmp;
+	return key_is_linear(key_def)
+		? linear_dense_dup_node_cmp
+		: dense_dup_node_cmp;
 }
 
 - (tree_cmp_t) key_node_cmp
 {
-	return is_linear ? linear_dense_key_node_cmp : dense_key_node_cmp;
+	return key_is_linear(key_def)
+		? linear_dense_key_node_cmp
+		: dense_key_node_cmp;
 }
 
 - (void) fold: (void *) node :(struct tuple *) tuple
@@ -1393,12 +1445,14 @@ linear_fixed_key_node_cmp(const void *key, const void * node, void *arg)
 
 @implementation FixedTreeIndex
 
-- (void) enable
+- (id) init: (struct key_def *) key_def_arg :(struct space *) space_arg
 {
-	[super enable];
-	first_field = find_first_field(key_def);
-	first_offset = find_fixed_offset(space, first_field, 0);
-	is_linear = key_is_linear(key_def);
+	self = [super init: key_def_arg :space_arg];
+	if (self) {
+		first_field = find_first_field(key_def);
+		first_offset = find_fixed_offset(space, first_field, 0);
+	}
+	return self;
 }
 
 - (size_t) node_size
@@ -1408,17 +1462,23 @@ linear_fixed_key_node_cmp(const void *key, const void * node, void *arg)
 
 - (tree_cmp_t) node_cmp
 {
-	return is_linear ? linear_fixed_node_cmp : fixed_node_cmp;
+	return key_is_linear(key_def)
+		? linear_fixed_node_cmp
+		: fixed_node_cmp;
 }
 
 - (tree_cmp_t) dup_node_cmp
 {
-	return is_linear ? linear_fixed_dup_node_cmp : fixed_dup_node_cmp;
+	return key_is_linear(key_def)
+		? linear_fixed_dup_node_cmp
+		: fixed_dup_node_cmp;
 }
 
 - (tree_cmp_t) key_node_cmp
 {
-	return is_linear ? linear_fixed_key_node_cmp : fixed_key_node_cmp;
+	return key_is_linear(key_def)
+		? linear_fixed_key_node_cmp
+		: fixed_key_node_cmp;
 }
 
 - (void) fold: (void *) node :(struct tuple *) tuple
