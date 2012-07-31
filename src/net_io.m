@@ -440,6 +440,9 @@ static bool
 bind_acceptor(Acceptor *acceptor)
 {
 	acceptor->listen_fd = create_acceptor_socket(&acceptor->service_config);
+	if (acceptor->listen_fd < 0) {
+		return false;
+	}
 
 	/* Notify a derived object on the bind event. */
 	@try {
