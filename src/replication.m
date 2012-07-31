@@ -220,7 +220,7 @@ output_cb(ev_watcher *watcher, int revents __attribute__((unused)))
 		 ntohs(addr->sin_port));
 
 	sock_set_option_nc(fd, SOL_SOCKET, SO_KEEPALIVE);
-	sock_set_blocking(fd, false);
+	sock_set_blocking(fd, true);
 
 	ev_io_stop(&accept_event);
 	ev_io_start(&send_event);
