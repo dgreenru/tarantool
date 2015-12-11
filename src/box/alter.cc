@@ -445,7 +445,7 @@ space_def_create_from_tuple(struct space_def *def, struct tuple *tuple,
 
 	space_def_init_flags(def, tuple);
 	space_def_check(def, namelen, engine_namelen, errcode);
-	access_check_ddl(def->uid);
+	//access_check_ddl(def->uid);
 }
 
 /* }}} */
